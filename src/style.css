@@ -1,0 +1,85 @@
+/* ------------------------------------------------------------------
+   Cinematic hero — Scenes 1–2
+   The look is mostly carried by this gradient + the rim light in WebGL.
+   Scroll length for the whole camera move lives in --hero-scroll and is
+   read by main.js, so it can be changed in exactly one place.
+   ------------------------------------------------------------------ */
+
+:root {
+  /* how far you scroll to complete Scene 1 -> Scene 2 (px).
+     Bigger = slower, more languid camera move. */
+  --hero-scroll: 3400px;
+  --bg-deep: #04050a;
+  --bg-mid: #0e131d;
+  --bg-glow: #23304a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg-deep);
+  /* no rubber-band over-pull — it fights the pinned scrub */
+  overscroll-behavior-y: none;
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* The pinned stage ------------------------------------------------- */
+#hero {
+  position: relative;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+  /* fallback sky: what you see for the frame before three paints, and instead of it if
+     WebGL is missing. Once the scene is up, the in-scene sky dome (main.js createSky)
+     carries the look — the canvas is transparent (alpha: true), so this shows through. */
+  background:
+    radial-gradient(
+      78% 62% at 63% 34%,
+      #23304a 0%,
+      #161d2c 34%,
+      #101724 62%,
+      var(--bg-deep) 100%
+    ),
+    linear-gradient(180deg, #05070d 0%, var(--bg-mid) 46%, #05060b 100%);
+}
+
+#hero > canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* subtle film-ish falloff, painted on top of the canvas, no interactivity */
+#hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(120% 100% at 50% 48%, transparent 44%, rgba(0, 0, 0, 0.55) 100%);
+}
+
+/* Scroll length --------------------------------------------------- */
+/* On a phone, 3400px of scroll is a long haul for one move — and because main.js reads
+   this variable, a media query is all it takes: the pin length follows automatically. */
+@media (max-width: 640px) {
+  :root {
+    --hero-scroll: 2100px;
+  }
+}
+
+#scroll-space {
+  /* MUST stay transparent: the fixed/absolute canvas reads through it.
+     Give your own sections an opaque background when you add Scene 3+. */
+  height: var(--hero-scroll);
+  background: transparent;
+}
