@@ -152,10 +152,6 @@ export function createStar(conf = STAR) {
     group,
     core,
     light,
-    // Scene 4 handles: the glow sprites + dust as a group of named layers so the
-    // fall overlay can flare and fade them without owning any state of its own.
-    layers: { nucleus, halo, flare, scatter },
-    motes,
     anchor: conf.position.clone(),
     /**
      * @param {{appear:number, notice:number, reach:number}} s3 Scene-3 progress, 0→1

@@ -513,14 +513,13 @@ export function createArtist(conf = MARKS) {
   // a couple of canvases leaning behind the stool — the tell of a working studio
   for (let i = 0; i < 2; i++)
     part(new THREE.BoxGeometry(0.46 - i * 0.1, 0.36 - i * 0.06, 0.02), wood, props, [0.95 + i * 0.03, 0.19 + i * 0.02, -0.86 - i * 0.05], [-0.2 + i * 0.05, -0.45 - i * 0.1, 0.06 * i]);
-  const contactBlobs = [];
   for (const [r, at, o] of [
     [0.9, [0, 0.003, 0.04], 0.5],
     [0.66, [0, 0.003, conf.canvas.z], 0.36],
     [0.42, [0.66, 0.003, -0.46], 0.3],
     [0.4, [0.98, 0.003, -0.85], 0.24],
   ])
-    contactBlobs.push(contactBlob(r, r * 0.72, at, o, props)); // may be null without a DOM; Scene 4 moves these with the collapsing floor
+    contactBlob(r, r * 0.72, at, o, props);
 
   /* ───────────────────────── animation ───────────────────────── */
 
@@ -611,6 +610,6 @@ export function createArtist(conf = MARKS) {
     props,
     update,
     stats: () => lastStats,
-    parts: { hips, chest, head, skull: skullMesh, hair, beret, rightArm, leftArm, legs, easel, canvasPanel, face, stool, contactBlobs },
+    parts: { hips, chest, head, skull: skullMesh, hair, beret, rightArm, leftArm, legs, easel, canvasPanel, face, stool },
   };
 }
