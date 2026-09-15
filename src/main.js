@@ -1,10 +1,16 @@
 /* =============================================================================
- *  SCROLL-DRIVEN CINEMATIC HERO — Scenes 1, 2 and 3
- *  One pinned section, one scroll, one camera move, three beats:
+ *  SCROLL-DRIVEN CINEMATIC HERO — Scenes 1, 2, 3 and 4
+ *  One pinned section, one scroll, one camera move, four beats:
  *    Scene 1  extreme close-up on the back of a painter's head/shoulder (no face)
  *    Scene 2  orbit + zoom-out settling beside him, side-profile against the easel
  *    Scene 3  a light appears beyond the canvas late in the SAME move, he notices it,
  *             stops painting and shifts a step closer as the scroll finishes
+ *    Scene 4  the fall: the floor breaks open under him and the camera plunges after
+ *             him into a deliberately black void (placeholder for the future abyss)
+ *  The pin now scrolls hero(3400px) + fall(2200px) = 5600px. Scenes 1–3 read
+ *  min(t / split, 1) off the same scrub, so their frames keep their exact pixel
+ *  timing; Scene 4 owns the remainder as a local p and only POST-PASSES on top
+ *  (see src/scene4.js) — camera-path.js and scene3.js are untouched by design.
  *  Scrolling up reverses all of it (GSAP scrub + damping in the render loop).
  *
  *  ── RUN ────────────────────────────────────────────────────────────────────
@@ -53,6 +59,7 @@ import { createArtist, MARKS } from './artist.js';
 import { createCameraRig, PATH } from './camera-path.js';
 import { createStar, STAR } from './star.js';
 import { measureScene3, SCENE3 } from './scene3.js';
+import { createFallLayer, FALL, heroTime } from './scene4.js';
 import './style.css';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -74,12 +81,20 @@ const cssNumber = (name, fallback) => {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
   return Number.isFinite(v) ? v : fallback;
 };
-/** single source of truth for how far you scroll: --hero-scroll in style.css */
-const scrollLength = cssNumber('--hero-scroll', 3400);
+/** single source of truth for how far you scroll: --hero-scroll + --fall-scroll in
+ *  style.css. Scenes 1–3 keep owning exactly the first --hero-scroll px; the split
+ *  remaps the whole-pin t so their frames, camera and star timing never shift. */
+const heroScroll = cssNumber('--hero-scroll', 3400);
+const fallScroll = cssNumber('--fall-scroll', 2200);
+const scrollLength = heroScroll + fallScroll; // the pin is one section: hero budget + fall budget
+const heroSplit = heroScroll / scrollLength; // ≈ 0.6071 with the CSS defaults
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 if (reducedMotion) {
   PATH.float.amp = 0; // no handheld drift; the scroll-driven move still works
   PATH.damping = 10;
+  FALL.camera.shake.pos *= 0.35; // the fall lurch keeps its punch, the jitter does not
+  FALL.camera.shake.rot *= 0.35;
+  FALL.camera.roll.kick *= 0.4;
 }
 
 /* ───────────────────────────── renderer ──────────────────────────── */
@@ -176,16 +191,11 @@ scene.add(canvasGlow);
 const baseGlow = canvasGlow.intensity;
 
 /* ───────────────────────────── ground ─────────────────────────────── */
-
-const ground = new THREE.Mesh(
-  new THREE.CircleGeometry(60, 72), // huge: its far edge is fully fogged, so no visible disc rim
-  new THREE.MeshStandardMaterial({ color: 0x0a0e16, roughness: 0.96, metalness: 0 })
-);
-ground.rotation.x = -Math.PI / 2;
-// no floor shadows: props are grounded by soft blobs in artist.js, and letting the floor
-// receive the map would print the directional light's rectangular ortho frustum on it
-ground.receiveShadow = false;
-scene.add(ground);
+/* Scene 4 needed a floor that can break, so the disc now lives in scene4.js as two
+   flush half-discs — same radius/segments/material as the old single disc, so Scenes 1–3
+   render identically (the seam is sub-pixel); `openW` pries them apart and hinges them
+   down. No floor shadows either before or after: props are grounded by soft blobs in
+   artist.js, and a shadow-receiving floor would print the key light's ortho frustum on it. */
 
 /* ───────────────────────────── the actor ─────────────────────────── */
 
@@ -207,13 +217,26 @@ const state = { t: 0 }; // GSAP writes this; the render loop reads it. Nothing e
 const rig = createCameraRig(camera);
 rig.update(0, 1 / 60); // place the camera before the first paint (no flash of the wrong shot)
 
+/* Scene 4: the fall. Its layer owns the split floor (see the ground note above), the
+   debris, the void veil — and post-passes camera/artist/star/light changes that are
+   pure functions of its own damped local progress p. No second pin, no second tween. */
+const fall = createFallLayer({
+  scene,
+  camera,
+  renderer,
+  artist,
+  star,
+  split: heroSplit,
+  lights: { key, rim, rim2, bounce, wash, canvasGlow },
+});
+
 const tween = gsap.to(state, {
   t: 1,
   ease: 'none',
   scrollTrigger: {
     trigger: '#hero',
     start: 'top top',
-    end: () => `+=${scrollLength}`, // 1:1 with --hero-scroll
+    end: () => `+=${scrollLength}`, // 1:1 with --hero-scroll + --fall-scroll
     pin: true,
     pinType: 'transform',
     anticipatePin: 1,
@@ -245,7 +268,7 @@ if (debug) {
   });
   document.body.appendChild(readout);
 }
-window.__hero = { state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, star, artist, measureScene3, tween, ScrollTrigger };
+window.__hero = { state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, FALL, heroSplit, star, artist, fall, measureScene3, tween, ScrollTrigger };
 
 /* ───────────────────────────── render loop ───────────────────────── */
 
@@ -256,7 +279,9 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min((now - last) / 1000, 1 / 20); // clamp: a backgrounded tab must not teleport the rig
   last = now;
   elapsed += dt;
-  const { pos, fov } = rig.update(state.t, dt);
+  // Scenes 1–3 own the first `heroSplit` of the pin; past it the rig latches at t = 1
+  // (end-frame framing) while Scene 4 descends *on top of it* — see scene4.js.
+  const { pos, fov } = rig.update(heroTime(state.t, heroSplit), dt);
 
   // Scene 3 reads the *rendered* progress, so his reaction can never disagree with the shot.
   const s3 = measureScene3(rig.t);
@@ -266,6 +291,9 @@ renderer.setAnimationLoop(() => {
   // the board dims only slightly as he turns away from it — enough to shift the picture's
   // weight onto the star, not enough to lose the canvas in the end frame
   canvasGlow.intensity = THREE.MathUtils.lerp(baseGlow, baseGlow * 0.78, s3.notice);
+  // Scene 4 post-pass: floor, flare, fall pose, camera descent, fog/lights/veil — all
+  // pure functions of its own damped local p; exactly zero writes before it starts.
+  const s4 = fall.update(state.t, elapsed, dt, s3, rig);
   renderer.render(scene, camera);
   if (readout) {
     // read-only on `pos`: mutating it would move the camera
@@ -275,7 +303,9 @@ renderer.setAnimationLoop(() => {
       `azim ${azim.toFixed(1)}°  dist ${Math.hypot(pos.x, pos.z).toFixed(2)}m  y ${pos.y.toFixed(2)}m  fov ${fov.toFixed(1)}°\n` +
       `scroll ${Math.round(window.scrollY)} / ${Math.round(scrollLength)}px\n` +
       `star ${s3.appear.toFixed(2)}  notice ${s3.notice.toFixed(2)}  reach ${s3.reach.toFixed(2)}  ` +
-      `step ${artist.stats().step.toFixed(3)}m  stroke ${artist.stats().strokeGate.toFixed(3)}`;
+      `step ${artist.stats().step.toFixed(3)}m  stroke ${artist.stats().strokeGate.toFixed(3)}\n` +
+      `fall p ${s4.p.toFixed(3)}  camY ${camera.position.y.toFixed(2)}m  drop ${s4.camDepth.toFixed(1)}m  ` +
+      `open ${s4.openW.toFixed(2)}  flare ${s4.flare.toFixed(2)}  split ${heroSplit.toFixed(4)}`;
   }
 });
 

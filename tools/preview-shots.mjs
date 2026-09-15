@@ -52,14 +52,19 @@ async function goTo(frac, name) {
 }
 
 await page.waitForTimeout(1500);
+// stops across the WHOLE pin: first 60.7% of it is Scenes 1–3, the rest is Scene 4
 for (const [frac, name] of [
   [0, '0-load'],
   [0.25, '1-quarter'],
   [0.5, '2-mid'],
-  [0.66, '3-star-in'],
-  [0.85, '4-notices'],
-  [1, '5-end'],
-  [0, '6-back-at-0'],
+  [0.55, '3-star-in'],
+  [0.59, '4-notices'],
+  [0.6071, '5-reach-end'],
+  [0.66, '6-collapse'],
+  [0.72, '7-lurch'],
+  [0.85, '8-deep-fall'],
+  [1, '9-void'],
+  [0, '10-back-at-0'],
 ])
   await goTo(frac, name);
 

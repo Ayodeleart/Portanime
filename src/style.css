@@ -1,14 +1,18 @@
 /* ------------------------------------------------------------------
-   Cinematic hero — Scenes 1–2
+   Cinematic hero — Scenes 1–4 (the fall)
    The look is mostly carried by this gradient + the rim light in WebGL.
-   Scroll length for the whole camera move lives in --hero-scroll and is
-   read by main.js, so it can be changed in exactly one place.
+   The pin is ONE section scrolled through two budgets: --hero-scroll for
+   Scenes 1–3 and --fall-scroll for Scene 4. main.js reads both and derives
+   `split`, so they can each be tuned in exactly one place.
    ------------------------------------------------------------------ */
 
 :root {
-  /* how far you scroll to complete Scene 1 -> Scene 2 (px).
+  /* how far you scroll to complete Scene 1 → Scene 3 (px).
      Bigger = slower, more languid camera move. */
   --hero-scroll: 3400px;
+  /* Scene 4's budget: the fall from the star's edge into the void (px).
+     Split math keeps Scenes 1–3 on their original pixels no matter what. */
+  --fall-scroll: 2200px;
   --bg-deep: #04050a;
   --bg-mid: #0e131d;
   --bg-glow: #23304a;
@@ -69,17 +73,19 @@ body {
 }
 
 /* Scroll length --------------------------------------------------- */
-/* On a phone, 3400px of scroll is a long haul for one move — and because main.js reads
-   this variable, a media query is all it takes: the pin length follows automatically. */
+/* On a phone, 3400 + 2200 px of scroll is a long haul for one move — and because
+   main.js reads both variables, a media query is all it takes: the pin length and the
+   hero/fall split follow automatically (beats live in t, so they survive the change). */
 @media (max-width: 640px) {
   :root {
     --hero-scroll: 2100px;
+    --fall-scroll: 1500px;
   }
 }
 
 #scroll-space {
   /* MUST stay transparent: the fixed/absolute canvas reads through it.
-     Give your own sections an opaque background when you add Scene 3+. */
-  height: var(--hero-scroll);
+     Give your own sections an opaque background when you add the abyss / projects. */
+  height: calc(var(--hero-scroll) + var(--fall-scroll));
   background: transparent;
 }

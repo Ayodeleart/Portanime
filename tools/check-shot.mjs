@@ -7,10 +7,12 @@
  * `npm run check`
  */
 import * as THREE from 'three';
+import { readFileSync } from 'node:fs';
 import { PATH, CAMERA_KEYS, TARGET_KEYS, FOV_KEYS, buildCurves, createCameraRig, orbit } from '../src/camera-path.js';
 import { createArtist, MARKS, POSE } from '../src/artist.js';
 import { createStar, STAR } from '../src/star.js';
 import { measureScene3, SCENE3, smoothstep } from '../src/scene3.js';
+import { FALL, FALL_POSE, heroTime, measureFall, createFallLayer } from '../src/scene4.js';
 import { loftGeometry, limbGeometry } from '../src/loft.js';
 
 let fails = 0;
@@ -344,6 +346,164 @@ console.log('\n— scene 3: the artist reacts —');
   ok(half > 0.02 && half < moved, 'a half-noticed star gets a half reaction (proportional, so it scrubs)', `${half.toFixed(3)}m of ${moved.toFixed(3)}m`);
   artist.update(0, 1 / 60); // leave the pose neutral for the framing tests that follow
   artist.group.updateMatrixWorld(true);
+}
+
+console.log('\n— scene 3 config is frozen (retime guard) —');
+{
+  const s3json = JSON.stringify([SCENE3.appear, SCENE3.notice, SCENE3.reach, SCENE3.step, SCENE3.lean, SCENE3.bob]);
+  ok(
+    s3json === '[[0.55,0.74],[0.68,0.88],[0.8,1],0.115,0.055,0.018]',
+    'SCENE3 byte-identical: Scene 4 layered a split remap over the same windows, it did not retime them'
+  );
+}
+
+console.log('\n— scene 4: split + timing —');
+{
+  const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  const heroM = css.match(/--hero-scroll:\s*(\d+)px/);
+  const fallM = css.match(/--fall-scroll:\s*(\d+)px/);
+  ok(heroM && fallM && +heroM[1] === 3400 && +fallM[1] === 2200, 'CSS budgets: hero 3400px + fall 2200px = 5600px total');
+  ok(Math.abs(FALL.split - 3400 / 5600) < 1e-12, 'split = 3400/5600 ≈ 0.6071', FALL.split.toFixed(5));
+  ok(heroTime(0) === 0 && heroTime(FALL.split) === 1 && heroTime(1) === 1, 'hero input: 1:1 to split, latched after', `${heroTime(FALL.split * 0.5).toFixed(3)} at half-hero`);
+  ok(heroTime(0.3) === THREE.MathUtils.clamp(0.3 / FALL.split, 0, 1), 'hero input is linear in px before the split');
+  ok(measureFall(FALL.split - 1e-9).p === 0, 'p is zero across the whole hero budget');
+  ok(measureFall(1).p === 1 && measureFall(FALL.split).p === 0, 'p spans exactly the fall budget');
+  let mono4 = true;
+  let prev = { p: -1, cam: -1 };
+  for (let i = 0; i <= 200; i++) {
+    const s = measureFall(i / 200);
+    if (s.p < prev.p - 1e-12 || s.camDepth < prev.cam - 1e-12) mono4 = false;
+    prev = { p: s.p, cam: s.camDepth };
+    if (s.flare < 0 || s.flare > 1.001) mono4 = false; // bounded envelope, never an explosion
+  }
+  ok(mono4, 'p, camera depth and the flare envelope stay bounded/monotonic across 0→1');
+  const b = FALL.beats;
+  ok(b.collapse[0] >= b.flare[0] && b.fall >= b.collapse[0] && b.fall < b.collapse[1] + 0.05 && b.blend[0] < b.fall, 'beat order: catch → flare/collapse → lift → blend', JSON.stringify(b));
+  ok(Math.abs(FALL.camera.drop - (1.42 + 16.9)) < 0.02, 'camera drop lands y ≈ −16.9 by p = 1', FALL.camera.drop.toFixed(2));
+  ok(Math.abs(FALL.ground.riftWidth - 5.9) < 1e-9 && FALL.camera.fov[1] === 45.5 && FALL.camera.fov[0] === 37, 'spec anchors: 5.9 m rift, FOV 37 → 45.5');
+}
+
+console.log('\n— scene 4: the fall layer on the real modules —');
+{
+  const scene4 = new THREE.Scene();
+  scene4.fog = new THREE.Fog(0x101724, 2.6, 15);
+  const star4 = createStar();
+  const lights = {};
+  for (const [k, v] of Object.entries({ key: 1.5, rim: 2.9, rim2: 1.35, bounce: 0.55, wash: 22, canvasGlow: 6 })) {
+    const l = new THREE.Object3D();
+    l.intensity = v;
+    lights[k] = l;
+  }
+  const layer = createFallLayer({ scene: scene4, camera, renderer: null, artist, star: star4, split: FALL.split, lights });
+  const tFor = (p) => FALL.split + p * (1 - FALL.split);
+  const runFrame = (totalT, elapsed = 1.0) => {
+    rig.update(heroTime(totalT, FALL.split), 1 / 60);
+    const s3 = measureScene3(rig.t);
+    star4.update(s3, elapsed, 1 / 60);
+    artist.update(elapsed, 1 / 60, s3, star4.anchor);
+    lights.canvasGlow.intensity = THREE.MathUtils.lerp(6, 6 * 0.78, s3.notice);
+    return layer.update(totalT, elapsed, 1 / 60, s3, rig);
+  };
+  const run = (totalT, frames) => {
+    let s4;
+    for (let i = 0; i < frames; i++) s4 = runFrame(totalT);
+    artist.group.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    return s4;
+  };
+  const snap = () =>
+    JSON.stringify({
+      cam: camera.position.toArray().map((n) => +n.toFixed(9)),
+      // fov rounded: rig.update's own 1e-4 write-hysteresis can strand it 7e-5° off; not Scene 4's doing
+      fov: +camera.fov.toFixed(4),
+      fig: artist.figure.position.toArray().map((n) => +n.toFixed(9)),
+      figR: [artist.figure.rotation.x, artist.figure.rotation.y, artist.figure.rotation.z].map((n) => +n.toFixed(9)),
+      knee: artist.parts.legs.right.knee.rotation.x,
+      hip: artist.parts.legs.right.hip.rotation.x,
+      tool: artist.parts.rightArm.tool.rotation.x,
+      propsY: artist.props.position.y,
+      fog: [scene4.fog.near, scene4.fog.far, scene4.fog.color.getHexString()],
+      glow: lights.canvasGlow.intensity,
+      key: lights.key.intensity,
+      halo: star4.layers.halo.material.opacity,
+      floor: [layer.floor.left.position.x, layer.floor.right.position.x],
+    });
+
+  // dormancy: with vs without the (asleep) layer, same pipeline → identical state
+  run(tFor(0), 900);
+  const withLayer = snap();
+  for (let i = 0; i < 900; i++) {
+    rig.update(1, 1 / 60);
+    const s3 = measureScene3(rig.t);
+    star4.update(s3, 1, 1 / 60);
+    artist.update(1, 1 / 60, s3, star4.anchor);
+    lights.canvasGlow.intensity = THREE.MathUtils.lerp(6, 6 * 0.78, s3.notice);
+  }
+  artist.group.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  ok(withLayer === snap(), 'at p = 0 the layer is dormant: every channel it can write is byte-identical to the Scenes 1–3 pipeline');
+  ok(layer.floor.left.position.x === -FALL.ground.hinge && layer.floor.right.position.x === FALL.ground.hinge, 'floor halves sit flush (no visible seam) before the fall');
+  ok(star4.layers.halo.material.opacity <= 1.0001, 'star opacity is clamped ≤ 1 through the flare', star4.layers.halo.material.opacity.toFixed(3));
+
+  // catch closes toward the star before support breaks
+  run(tFor(0), 300);
+  const hand0 = worldOf(artist.parts.rightArm.hand).distanceTo(STAR.position);
+  run(tFor(0.065), 500);
+  const handC = worldOf(artist.parts.rightArm.hand);
+  const tipC = new THREE.Vector3();
+  artist.parts.rightArm.tool.children[2].getWorldPosition(tipC);
+  ok(hand0 - handC.distanceTo(STAR.position) > 0.12, 'catch moves the hand toward the star (closes the gap)', `${hand0.toFixed(3)}m → ${handC.distanceTo(STAR.position).toFixed(3)}m`);
+  ok(tipC.distanceTo(STAR.position) < 1.6, '…and brings the brush tip near it — reaching to meet, flare bridging', `${tipC.distanceTo(STAR.position).toFixed(2)}m`);
+  const aimErr = THREE.MathUtils.radToDeg(
+    Math.acos(THREE.MathUtils.clamp(tipC.clone().sub(handC).normalize().dot(STAR.position.clone().sub(handC).normalize()), -1, 1))
+  );
+  ok(aimErr < 16, 'the brush points at the star at the catch', `${aimErr.toFixed(1)}° off`);
+
+  // the floor wrenches open sharply, then creeps
+  run(tFor(1), 1200);
+  const gap = layer.floor.right.position.x - layer.floor.left.position.x - 2 * FALL.ground.hinge;
+  ok(Math.abs(gap - FALL.ground.riftWidth) < 0.05, 'rift is 5.9 m across at full open', `${gap.toFixed(2)}m`);
+  ok(layer.floor.left.position.y < -4 && layer.floor.right.position.y < -4, 'halves sink sharply, not gently', `${layer.floor.left.position.y.toFixed(2)}m`);
+  ok(Math.abs(layer.floor.left.rotation.z) > 0.07, 'hinged, not just slid', `${THREE.MathUtils.radToDeg(layer.floor.left.rotation.z).toFixed(1)}°`);
+  const open055 = measureFall(tFor(0.15)).openW - measureFall(tFor(0.055)).openW;
+  ok(open055 / measureFall(1).openW > 0.7, 'most of the opening happens inside the sharp collapse window', `${(open055 * 100).toFixed(0)}% by p=.15`);
+  ok(artist.props.position.y < -8, 'the easel rides the collapsing centre down into the dark', `${artist.props.position.y.toFixed(2)}m`);
+
+  // camera: lurch, acceleration, end state; artist drifts up while falling deeper
+  run(tFor(0), 700);
+  const camBase = camera.position.clone();
+  ok(Math.abs(camBase.y - 1.42) < 0.01, 'camera starts at the Scene-3 end height', camBase.y.toFixed(3));
+  const s4a = run(tFor(0.21), 700);
+  ok(s4a.camDepth > 0.35 * FALL.camera.drop, 'a sharp lurch: >35% of the depth arrives in the first 0.135 of p', `${s4a.camDepth.toFixed(1)}m`);
+  const mid = run(tFor(0.45), 900);
+  const midHeadN = worldOf(artist.parts.head).project(camera);
+  ok(Math.abs(midHeadN.x) < 0.85 && midHeadN.y > -0.5 && midHeadN.y < 0.9, 'artist readable through the first part of the fall', `head ndc ${midHeadN.x.toFixed(2)}, ${midHeadN.y.toFixed(2)}`);
+  void mid;
+  const end = run(tFor(1), 1500);
+  ok(Math.abs(camera.position.y + 16.9) < 0.05, 'camera lands at y ≈ −16.9 m', camera.position.y.toFixed(2));
+  ok(Math.abs(camera.fov - 45.5) < 0.05, 'FOV ends on 45.5°', camera.fov.toFixed(1));
+  const endHead = worldOf(artist.parts.head);
+  const nEnd = endHead.clone().project(camera);
+  ok(nEnd.y > 0.5 && Math.abs(nEnd.x) < 0.88, 'late in the fall he drifts UP in frame (falling deeper than the camera)', `ndc ${nEnd.x.toFixed(2)}, ${nEnd.y.toFixed(2)}`);
+  ok(endHead.y - camera.position.y < -2.2, '…because he is genuinely below the camera', `${(endHead.y - camera.position.y).toFixed(2)}m`);
+  ok(end.p > 0.99999, 'p reaches 1 at the end of the pin (damping converges to it, exactly like rig.t does)', end.p.toFixed(6));
+
+  // star flare + distance fade; lights/fog toward black
+  run(tFor(0), 400);
+  const baseLight = star4.light.intensity;
+  run(tFor(0.16), 700);
+  ok(star4.light.intensity > baseLight * 1.8, 'the star flares bright at the catch moment', `${star4.light.intensity.toFixed(1)} vs ${baseLight.toFixed(1)}`);
+  run(tFor(1), 1500);
+  ok(star4.light.intensity < 0.05 && star4.layers.halo.material.opacity < 0.02, '…then fades with distance to nothing', `L ${star4.light.intensity.toFixed(3)} halo ${star4.layers.halo.material.opacity.toFixed(3)}`);
+  ok(lights.key.intensity < 1.5 * 0.21 && lights.key.intensity > 1.5 * 0.15, 'studio lights dim to the floor value (≈18%)', lights.key.intensity.toFixed(2));
+  ok(scene4.fog.far < 8 && scene4.fog.near < 0.6 && scene4.fog.color.getHexString() === '000000', 'fog tightens to near-black at the bottom', `far ${scene4.fog.far}`);
+
+  // reversal: the whole excursion unwinds to exactly the dormant state
+  const before = run(tFor(0), 900) && snap();
+  run(tFor(1), 1600);
+  run(tFor(0.5), 400);
+  const after = run(tFor(0), 2400) && snap();
+  ok(before === after, 'scroll down-to-1 (via 0.5) and back to 0 restores camera/artist/floor/fog/lights/star byte-for-byte');
 }
 
 console.log('\n— easel readability in the settled shot —');
