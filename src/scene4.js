@@ -40,23 +40,32 @@ import { smoothstep } from './scene3.js';
 /* ───────────────────────────── timing + motion (all in local p) ───────────────────────────── */
 
 export const FALL = {
-  /** px budget — the truth lives in style.css; main.js reads it and recomputes
-   *  `split` at runtime. These are the fallback + documentation. */
-  scroll: { hero: 3400, fall: 2200 },
-  /** fraction of the whole pin owned by Scenes 1–3 (3400 / 5600 ≈ 0.6071) */
+  /** px budgets — the truth lives in style.css (--reveal-scroll, --story-scroll,
+   *  --fall-scroll); main.js reads them and builds the scroll map at runtime.
+   *  These are the fallback + documentation. */
+  scroll: { reveal: 2108, story: 2400, fall: 2200 },
+  /** legacy two-way split, kept so the linear helpers/tests still resolve */
   split: 3400 / 5600,
+  /** heroT at which the Scenes 1–2 reveal ends == SCENE3.appear[0]; the reveal
+   *  budget maps linearly to it at 1/3400 px — the ORIGINAL pixels, unchanged */
+  revealEndT: 0.62,
 
   beats: {
-    catch: [0.0, 0.11], // hand closes toward the star
-    flare: [0.015, 0.32], // star brightens / grows briefly, never explodes
-    collapse: [0.055, 0.15], // ground splits + sinks, sharply
+    // The windows are deliberately FRONT-loaded: the star must flare, break and
+    // start fading while it is still IN FRAME — the dive takes it out of the top
+    // of the window by p ≈ 0.16, so a late flare would be a glow the audience
+    // never sees. Reach is fully committed by p = 0.04 (Scene 3 + catch pose),
+    // the ground answers at 0.07, the star breaks at 0.10, the descent starts.
+    catch: [0.0, 0.09], // hand closes toward the star
+    flare: [0.03, 0.095], // star brightens / grows — the CAUSE reads; the break lands exactly as the dive starts
+    collapse: [0.07, 0.17], // ground splits + sinks, sharply, one breath after the reach settles
     blend: [0.01, 0.55], // reach pose → fall pose
-    fall: 0.075, // the descent begins
+    fall: 0.1, // the descent begins
   },
 
   /** one descent curve for the camera: a lurch share arrives fast, the rest
    *  accelerates with pow(). Monotonic by construction, so it scrubs cleanly. */
-  shape: { lurchStart: 0.075, lurchEnd: 0.21, lurchShare: 0.44, accel: 1.8 },
+  shape: { lurchStart: 0.1, lurchEnd: 0.24, lurchShare: 0.44, accel: 1.8 },
 
   ground: {
     radius: 60, // match the old ground disc exactly → Scenes 1–3 look identical
@@ -94,7 +103,7 @@ export const FALL = {
   star: {
     flareLight: 2.0, // × base point-light intensity at flare peak
     flareGrow: 0.55, // × core scale at flare peak
-    fade: [0.3, 0.8], // …then fade with distance as the camera falls away
+    fade: [0.095, 0.42], // …then fade with distance as the camera falls away
   },
 
   void_: {
@@ -121,7 +130,7 @@ export const FALL_POSE = {
   /** final small step off the collapsing floor, toward the star */
   step: { dist: 0.09, win: [0.0, 0.08] },
   /** brush arm reaches up-and-across toward the star at the catch */
-  catchArm: { pivotX: -0.58, pivotY: -0.9, pivotZ: 0.22, elbowX: -0.32, toolX: 0.1, chestLeanX: 0.42, win: [0.01, 0.115] },
+  catchArm: { pivotX: -1.141, pivotY: 0.531, pivotZ: 0.516, elbowX: -0.063, toolX: 0.281, chestLeanX: 0.1, win: [0.002, 0.03] },
   /** whole-body fall pose, scaled by the blend window FALL.beats.blend */
   body: {
     pitch: -0.5, // figure.rotation.x — back-tumble, face to the sky
@@ -155,6 +164,38 @@ const winW = (x, [a, b]) => smoothstep(x, a, b);
  *  `split` of the scroll, then Scene 3 latches while the fall plays out. */
 export const heroTime = (t, split = FALL.split) => THREE.MathUtils.clamp(t / split, 0, 1);
 
+/**
+ * The three-budget scroll map — how px of pin translate to the two stories:
+ *
+ *   px 0 → reveal           heroT 0 → revealEndT        Scenes 1–2's orbit, at the
+ *        (--reveal-scroll)                               ORIGINAL 1/3400 px slope:
+ *                                                        every pre-Scene-3 frame keeps
+ *                                                        the pixels it always had
+ *   px reveal → reveal+story heroT revealEndT → 1       Scene 3's beat (star appears,
+ *        (--story-scroll)                                notice, reach) on its own
+ *                                                        stretched budget — the story
+ *                                                        breathes here
+ *   px reveal+story → total  p 0 → 1                     Scene 4's fall
+ *        (--fall-scroll)
+ *
+ * Monotonic and continuous; flat latches at each end. main.js builds this from the
+ * CSS variables; everything downstream (rig input, Scene-3 windows, the fall) reads it.
+ */
+export function buildScrollMap({ revealPx = FALL.scroll.reveal, storyPx = FALL.scroll.story, fallPx = FALL.scroll.fall, revealEndT = FALL.revealEndT } = {}) {
+  const totalPx = revealPx + storyPx + fallPx;
+  const heroT = (t) => {
+    const px = THREE.MathUtils.clamp(t, 0, 1) * totalPx;
+    if (px <= revealPx) return (px / revealPx) * revealEndT; // px-identical to the old /3400 slope when revealPx = revealEndT·3400
+    if (px >= revealPx + storyPx) return 1;
+    return revealEndT + ((px - revealPx) / storyPx) * (1 - revealEndT);
+  };
+  const p = (t) => {
+    const px = THREE.MathUtils.clamp(t, 0, 1) * totalPx;
+    return THREE.MathUtils.clamp((px - revealPx - storyPx) / fallPx, 0, 1);
+  };
+  return { totalPx, revealPx, storyPx, fallPx, revealEndT, heroT, p };
+}
+
 /** one descent curve: the lurch share arrives fast, the rest accelerates with pow(). */
 export function depthShape(p, { drop, lurchStart = FALL.shape.lurchStart, lurchEnd = FALL.shape.lurchEnd, lurchShare = FALL.shape.lurchShare, accel = FALL.shape.accel }) {
   const u = THREE.MathUtils.clamp((p - lurchStart) / (1 - lurchStart), 0, 1);
@@ -167,9 +208,8 @@ export const cameraDepth = (p, cfg = FALL.camera) =>
 export const artistDepth = (p, cfg = FALL.artist) =>
   depthShape(p, { drop: cfg.drop, lurchStart: cfg.start, lurchEnd: cfg.lurchEnd, lurchShare: cfg.lurchShare, accel: cfg.accel });
 
-/** every Scene-4 weight in one pure read of the total pin progress `t`. */
-export function measureFall(t, split = FALL.split) {
-  const p = THREE.MathUtils.clamp((t - split) / (1 - split), 0, 1);
+/** every Scene-4 weight from the local progress alone — the canonical entry point. */
+export function scene4Weights(p, t = 0, split = FALL.split) {
   const b = FALL.beats;
   const flareU = winW(p, b.flare);
   const collapseW = winW(p, b.collapse);
@@ -192,6 +232,11 @@ export function measureFall(t, split = FALL.split) {
   };
 }
 
+/** the linear-split form, kept as the fallback + for tools */
+export function measureFall(t, split = FALL.split) {
+  return scene4Weights(THREE.MathUtils.clamp((t - split) / (1 - split), 0, 1), t, split);
+}
+
 /* ───────────────────────────── the layer ───────────────────────────── */
 
 /** tiny LCG so debris scatter is irregular but identical every reload */
@@ -208,6 +253,7 @@ function seeded(n) {
  */
 export function createFallLayer(ctx) {
   const split = ctx.split ?? FALL.split;
+  const toP = ctx.toP ?? ((t) => THREE.MathUtils.clamp((t - split) / (1 - split), 0, 1));
   const { scene, camera, artist, star, renderer } = ctx;
   const conf = FALL;
 
@@ -300,7 +346,7 @@ export function createFallLayer(ctx) {
   /* damped total: Scene 4 reads the *rendered* progress — the same λ the rig uses —
      so the fall can never disagree with the shot, and reversals ease identically. */
   let cur = 0;
-  let s4 = measureFall(0, split);
+  let s4 = scene4Weights(0);
 
   const apply = (time, s3) => {
     const p = s4.p;
@@ -442,7 +488,7 @@ export function createFallLayer(ctx) {
     get s4() {
       return s4;
     },
-    measure: (t) => measureFall(t, split),
+    measure: (t) => scene4Weights(toP(t), t, split),
     /**
      * Damp the total pin progress, then apply every Scene-4 delta.
      * @param {number} totalT whole-pin progress 0→1 over the full 5600 px
@@ -453,7 +499,7 @@ export function createFallLayer(ctx) {
      */
     update(totalT, time, dt, s3, rig) {
       cur += (THREE.MathUtils.clamp(totalT, 0, 1) - cur) * (1 - Math.exp(-PATH.damping * Math.min(dt, 0.05)));
-      s4 = measureFall(cur, split);
+      s4 = scene4Weights(toP(cur), cur, split);
       apply(time, s3);
 
       /* camera overlay. Skipped entirely while p ≈ 0 (and after a return to 0): the

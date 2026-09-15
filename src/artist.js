@@ -513,13 +513,14 @@ export function createArtist(conf = MARKS) {
   // a couple of canvases leaning behind the stool — the tell of a working studio
   for (let i = 0; i < 2; i++)
     part(new THREE.BoxGeometry(0.46 - i * 0.1, 0.36 - i * 0.06, 0.02), wood, props, [0.95 + i * 0.03, 0.19 + i * 0.02, -0.86 - i * 0.05], [-0.2 + i * 0.05, -0.45 - i * 0.1, 0.06 * i]);
+  const contactBlobs = [];
   for (const [r, at, o] of [
     [0.9, [0, 0.003, 0.04], 0.5],
     [0.66, [0, 0.003, conf.canvas.z], 0.36],
     [0.42, [0.66, 0.003, -0.46], 0.3],
     [0.4, [0.98, 0.003, -0.85], 0.24],
   ])
-    contactBlob(r, r * 0.72, at, o, props);
+    contactBlobs.push(contactBlob(r, r * 0.72, at, o, props)); // may be null without a DOM; Scene 4 moves these with the collapsing floor
 
   /* ───────────────────────── animation ───────────────────────── */
 
@@ -541,7 +542,7 @@ export function createArtist(conf = MARKS) {
     // ---- breath, sway, weight ----
     const breath = Math.sin(time * Math.PI * 2 * IDLE.breathHz);
     chest.position.y = chestBaseY + breath * 0.0038;
-    chest.rotation.x = POSE.chest.x + breath * 0.007 - 0.035 * reach; // he leans in
+    chest.rotation.x = POSE.chest.x + breath * 0.007 - 0.17 * reach; // a clear commit toward the light
     chest.rotation.z = POSE.chest.z + Math.sin(time * 0.9) * 0.006;
     hips.rotation.z = POSE.hips.z + Math.sin(time * Math.PI * 2 * IDLE.swayHz) * 0.008;
     head.rotation.x = headBase.x + Math.sin(time * 0.62) * 0.014;
@@ -549,18 +550,18 @@ export function createArtist(conf = MARKS) {
 
     // ---- painting: short strokes, then he stops to study the canvas ----
     const gate = 0.3 + 0.7 * Math.pow(Math.max(0, Math.sin(time * Math.PI * IDLE.strokeGate + 0.6)), 1.5);
-    const paused = 1 - 0.92 * notice; // the star silences the brush; he never drops it
+    const paused = 1 - 0.99 * notice; // the star stills the brush almost completely — a visible stop, not a suggestion; he never drops it
     const stroke = Math.sin(time * Math.PI * 2 * IDLE.strokeHz) * gate * paused;
     rightArm.pivot.rotation.x = armBase.brush.x + stroke * IDLE.strokeAmp;
     rightArm.pivot.rotation.y = armBase.brush.y + Math.sin(time * 1.02 + 0.4) * 0.11 * gate * paused;
     rightArm.elbow.rotation.x = armBase.brushElbow + stroke * 0.19;
     if (rightArm.tool) rightArm.tool.rotation.z = 0.1 + stroke * 0.22; // a little twist, not a flourish
     // at full reach the brush hand drifts up off the canvas and stays there — held, not lowered
-    rightArm.pivot.rotation.x += 0.13 * reach;
-    rightArm.pivot.rotation.z = armBase.brush.z - 0.1 * reach;
-    rightArm.elbow.rotation.x += -0.22 * reach;
-    leftArm.pivot.rotation.x = armBase.palette.x + Math.sin(time * 0.4) * 0.015 - 0.1 * reach; // palette held up, forgotten
-    leftArm.elbow.rotation.x = armBase.paletteElbow - 0.16 * reach;
+    rightArm.pivot.rotation.x += 0.34 * reach; // the brush arm lifts OFF the canvas, held up toward the light
+    rightArm.pivot.rotation.z = armBase.brush.z - 0.24 * reach;
+    rightArm.elbow.rotation.x += -0.55 * reach;
+    leftArm.pivot.rotation.x = armBase.palette.x + Math.sin(time * 0.4) * 0.015 - 0.26 * reach; // palette comes up, forgotten
+    leftArm.elbow.rotation.x = armBase.paletteElbow - 0.42 * reach;
 
     // ---- the reaction, aimed at the star itself ----
     let yaw = 0;
@@ -571,11 +572,14 @@ export function createArtist(conf = MARKS) {
       const flat = Math.hypot(tmp2.x, tmp2.z) || 1e-4;
       yaw = Math.atan2(tmp2.x, tmp2.z) - group.rotation.y; // into the figure's frame
       pitch = Math.atan2(tmp2.y, flat);
-      head.rotation.y += yaw * 0.6 * notice; // a glance, not a swivel
-      head.rotation.x += -pitch * 0.85 * notice; // he looks up
-      chest.rotation.y = POSE.chest.y + yaw * 0.2 * notice + 0.04 * reach;
-      hips.rotation.y = POSE.hips.y + yaw * 0.1 * notice;
-      head.rotation.z = headBase.z + yaw * 0.06 * notice; // tilts a touch as if unsure
+      // the Scene-3 anchor sits ~35° off his facing, so the compound lands near a
+      // 40° turn — head leads, chest follows, pelvis barely — unmistakable on a
+      // phone silhouette without going full caricature.
+      head.rotation.y += yaw * 0.8 * notice; // a deliberate turn — head leads, reads from any seat
+      head.rotation.x += -pitch * 1.0 * notice; // and tips up for it (the star is 20° over the horizon)
+      chest.rotation.y = POSE.chest.y + yaw * 0.3 * notice + 0.07 * reach; // upper body follows through
+      hips.rotation.y = POSE.hips.y + yaw * 0.12 * notice;
+      head.rotation.z = headBase.z + yaw * 0.08 * notice; // tilts a touch as if unsure
 
       // ---- a half step toward it, with a foot that lifts and plants ----
       const step = SCENE3.step * reach;
@@ -610,6 +614,6 @@ export function createArtist(conf = MARKS) {
     props,
     update,
     stats: () => lastStats,
-    parts: { hips, chest, head, skull: skullMesh, hair, beret, rightArm, leftArm, legs, easel, canvasPanel, face, stool },
+    parts: { hips, chest, head, skull: skullMesh, hair, beret, rightArm, leftArm, legs, easel, canvasPanel, face, stool, contactBlobs },
   };
 }

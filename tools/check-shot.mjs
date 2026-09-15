@@ -7,11 +7,14 @@
  * `npm run check`
  */
 import * as THREE from 'three';
+import { readFileSync } from 'node:fs';
 import { PATH, CAMERA_KEYS, TARGET_KEYS, FOV_KEYS, buildCurves, createCameraRig, orbit } from '../src/camera-path.js';
 import { createArtist, MARKS, POSE } from '../src/artist.js';
 import { createStar, STAR } from '../src/star.js';
 import { measureScene3, SCENE3, smoothstep } from '../src/scene3.js';
+import { FALL, FALL_POSE, heroTime, measureFall, createFallLayer, buildScrollMap, scene4Weights } from '../src/scene4.js';
 import { loftGeometry, limbGeometry } from '../src/loft.js';
+import { createHash } from 'node:crypto';
 
 let fails = 0;
 const ok = (cond, label, detail = '') => {
@@ -258,10 +261,11 @@ console.log('\n— scene 3: the star —');
 const star = createStar();
 scene3Star: {
   ok(star.group.visible === false, 'hidden at t=0', `visible=${star.group.visible}`);
-  star.update(measureScene3(0.5), 1);
-  ok(!star.group.visible, 'still hidden at t=0.5 (the orbit stays about the artist)');
-  star.update(measureScene3(0.62), 1);
-  ok(star.group.visible && star.light.intensity > 0 && star.light.intensity < STAR.light.intensity, 'half-arrived at t=0.62', `light ${star.light.intensity.toFixed(2)}/${STAR.light.intensity}`);
+  star.update(measureScene3(SCENE3.appear[0] - 0.02), 1);
+  ok(!star.group.visible, `still hidden just before the window (t=${(SCENE3.appear[0] - 0.02).toFixed(2)}) — the orbit stays about the artist`);
+  const tAppearMid = (SCENE3.appear[0] + SCENE3.appear[1]) / 2;
+  star.update(measureScene3(tAppearMid), 1);
+  ok(star.group.visible && star.light.intensity > 0 && star.light.intensity < STAR.light.intensity, `half-arrived at the window mid (t=${tAppearMid.toFixed(2)})`, `light ${star.light.intensity.toFixed(2)}/${STAR.light.intensity}`);
   star.update(measureScene3(1), 1);
   ok(
     star.light.intensity > STAR.light.intensity && star.light.intensity < STAR.light.intensity * 1.32,
@@ -278,13 +282,47 @@ scene3Star: {
   ok(Math.abs(f.x) < 0.82 && Math.abs(f.y) < 0.72, 'visible in the end frame, clear of the edges', `ndc ${f.x.toFixed(2)}, ${f.y.toFixed(2)}`);
   ok(f.dist > canvasReal.dist, 'it hangs BEYOND the canvas, not in front of it', `star ${f.dist.toFixed(2)}m vs canvas ${canvasReal.dist.toFixed(2)}m`);
   ok(Math.hypot(f.x - canvasReal.x, f.y - canvasReal.y) > 0.28, 'separated from the canvas on screen', `Δ${Math.hypot(f.x - canvasReal.x, f.y - canvasReal.y).toFixed(2)}`);
-  ok(Math.hypot(f.x - headReal.x, f.y - headReal.y) > 0.5, 'not sitting on his head', `Δ${Math.hypot(f.x - headReal.x, f.y - headReal.y).toFixed(2)}`);
+  const headSep = Math.hypot(f.x - headReal.x, f.y - headReal.y);
+  ok(headSep > 0.35, 'not sitting on his head (clear separation on screen)', `Δ${headSep.toFixed(2)} ndc ≈ ${Math.round(headSep * H / 2)}px at ${H}p`);
   // it must also be in frame earlier in the reveal, or the fade-in is wasted
   settle(0.8);
   const f8 = frame(worldOf(star.group));
   ok(Math.abs(f8.x) < 0.95 && Math.abs(f8.y) < 0.95, 'already in frame at t=0.8', `ndc ${f8.x.toFixed(2)}, ${f8.y.toFixed(2)}`);
   const gaze = worldOf(star.group).sub(worldOf(artist.parts.head)).setY(0).normalize();
-  ok(gaze.z > 0.85, 'it sits ahead of him (his facing is +Z), so a glance finds it', `${(Math.acos(THREE.MathUtils.clamp(gaze.z, -1, 1)) * 57.3).toFixed(0)}° off his axis`);
+  const gazeOff = (Math.acos(THREE.MathUtils.clamp(gaze.z, -1, 1)) * 57.3);
+  ok(gazeOff > 18 && gazeOff < 52, 'it sits lateral-forward: big enough that the TURN reads, close enough that a glance finds it', `${gazeOff.toFixed(0)}° off his axis`);
+}
+
+console.log('\n— scene 3: the star, on a PHONE viewport (390×844) —');
+{
+  // The live-report said "star not visible" — on portrait aspects the old anchor was
+  // simply OFF FRAME (ndc.x ≈ 1.8). This block is the regression guard: at every heroT
+  // the beat plays on, the star must be comfortably inside a 390×844 frame.
+  const camP = new THREE.PerspectiveCamera(30, 390 / 844, 0.03, 60);
+  const rigP = createCameraRig(camP);
+  const starP = createStar();
+  const artistP = createArtist();
+  artistP.group.updateMatrixWorld(true);
+  const settleP = (t) => { for (let i = 0; i < 500; i++) { rigP.update(t, 1 / 60); if (Math.abs(rigP.t - t) < 1e-7) break; } camP.updateMatrixWorld(true); };
+  let allIn = true, worstX = 0, minGlowPx = 1e9, minHeadSep = 1e9;
+  for (const t of [SCENE3.appear[0] + 0.08, SCENE3.appear[1], (SCENE3.notice[0] + SCENE3.notice[1]) / 2, 0.9, 1]) {
+    settleP(t);
+    const s3p = measureScene3(t);
+    starP.update(s3p, t, 1 / 60);
+    artistP.update(1, 1 / 60, s3p, starP.anchor);
+    artistP.group.updateMatrixWorld(true);
+    const p = starP.group.position.clone().project(camP);
+    if (Math.abs(p.x) > 0.88 || Math.abs(p.y) > 0.88) allIn = false;
+    worstX = Math.max(worstX, Math.abs(p.x));
+    const d = Math.max(0.2, starP.group.position.distanceTo(camP.position));
+    const glowPx = (2 * Math.atan((STAR.size * STAR.haloScale / 2) / d) / (2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(camP.fov) / 2)))) * 844;
+    minGlowPx = Math.min(minGlowPx, glowPx);
+    const hp = artistP.parts.head.getWorldPosition(new THREE.Vector3()).project(camP);
+    minHeadSep = Math.min(minHeadSep, Math.hypot(p.x - hp.x, p.y - hp.y) * 844 / 2);
+  }
+  ok(allIn, 'in frame through the WHOLE beat at portrait aspect (the old anchor failed this)', `worst |ndc.x| ${worstX.toFixed(2)}`);
+  ok(minGlowPx > 60, 'the halo alone is a clearly visible object on a phone (not a sub-pixel smudge)', `≥${Math.round(minGlowPx)}px across at 844p`);
+  ok(minHeadSep > 90, 'clear of the head silhouette on a phone too', `≥${Math.round(minHeadSep)}px separation`);
 }
 
 console.log('\n— scene 3: the artist reacts —');
@@ -310,10 +348,10 @@ console.log('\n— scene 3: the artist reacts —');
   artist.update(0.5, 1 / 60, measureScene3(1), STAR.position);
   artist.figure.updateMatrixWorld(true);
   const turned = artist.parts.head.rotation.y - headNeutral;
-  ok(turned > 0.04, 'head turns toward the star', `+${turned.toFixed(3)}rad of yaw`);
+  ok(turned > 0.4, 'head turns toward the star — a third of a right angle, visible on a phone', `+${turned.toFixed(3)}rad of yaw (${(turned * 57.3).toFixed(0)}°)`);
   ok(artist.parts.head.rotation.x < 0, 'and tips up for it', `${artist.parts.head.rotation.x.toFixed(3)}`);
   const moved = artist.figure.position.length();
-  ok(Math.abs(moved - SCENE3.step * measureScene3(1).reach) < 1e-3 && moved > 0.05 && moved < 0.2, 'takes a small step toward it, not a walk', `${moved.toFixed(3)}m`);
+  ok(Math.abs(moved - SCENE3.step * measureScene3(1).reach) < 1e-3 && moved > 0.15 && moved < 0.3, 'takes a clear step toward it, not a walk', `${moved.toFixed(3)}m`);
   ok(artist.figure.position.z > 0, 'the step is toward +Z (where the star is)', `z ${artist.figure.position.z.toFixed(3)}`);
   // the easel must not be dragged by his step: measure it on both sides of the reaction
   artist.update(0.5, 1 / 60, measureScene3(0), STAR.position);
@@ -344,6 +382,195 @@ console.log('\n— scene 3: the artist reacts —');
   ok(half > 0.02 && half < moved, 'a half-noticed star gets a half reaction (proportional, so it scrubs)', `${half.toFixed(3)}m of ${moved.toFixed(3)}m`);
   artist.update(0, 1 / 60); // leave the pose neutral for the framing tests that follow
   artist.group.updateMatrixWorld(true);
+}
+
+console.log('\n— scene 3 config frozen at the beat-fix baseline (retime guard) —');
+{
+  const s3json = JSON.stringify([SCENE3.appear, SCENE3.notice, SCENE3.reach, SCENE3.step, SCENE3.lean, SCENE3.bob]);
+  ok(
+    s3json === '[[0.62,0.82],[0.72,0.92],[0.84,1],0.21,0.09,0.03]',
+    'SCENE3 matches the approved retune (windows stretched for the story budget, step/lean/bob boosted). Anything else needs a deliberate re-bake.'
+  );
+  // The Scenes 1–2 REVEAL itself is what must never move: camera-path.js, byte-frozen.
+  const cpSrc = readFileSync(new URL('../src/camera-path.js', import.meta.url), 'utf8');
+  ok(
+    createHash('sha256').update(cpSrc).digest('hex') === '6584f72ca43d7b44d9361434d823420306db0cee2b627ea2220b45578562d8bc',
+    'camera-path.js is byte-identical to the pre-fix reveal — Scenes 1–2 cannot have been retimed here'
+  );
+}
+
+console.log('\n— scene 4: split + timing —');
+{
+  const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+  const revealM = css.match(/--reveal-scroll:\s*(\d+)px/);
+  const storyM = css.match(/--story-scroll:\s*(\d+)px/);
+  const fallM = css.match(/--fall-scroll:\s*(\d+)px/);
+  ok(revealM && storyM && fallM && +revealM[1] === 2108 && +storyM[1] === 2400 && +fallM[1] === 2200,
+    'CSS budgets: reveal 2108px + story 2400px + fall 2200px = 6708px total');
+  ok(css.includes('calc(var(--reveal-scroll) + var(--story-scroll) + var(--fall-scroll))'), '#scroll-space height sums all three budgets');
+  {
+    const map = buildScrollMap();
+    ok(map.revealEndT === SCENE3.appear[0], 'the reveal budget ends exactly where the star window opens (no gap, no overlap)');
+    ok(map.totalPx === 6708, 'map total = the CSS total', `${map.totalPx}px`);
+    // the ONE promise to Scenes 1–2: identical pixels below the reveal end
+    let worst = 0;
+    for (let px = 0; px <= 2108; px += 37) worst = Math.max(worst, Math.abs(map.heroT(px / map.totalPx) - px / 3400));
+    ok(worst < 1e-12, 'Scenes 1–2 keep the ORIGINAL 1/3400 px slope — px-identical reveal below 2108', `worst heroT drift ${worst.toExponential(1)}`);
+    ok(map.heroT(1) === 1 && map.p(map.revealPx / map.totalPx) === 0 && map.p(0.5) === 0, 'heroT latches at story end; p is exactly zero across reveal+story');
+    ok(Math.abs(map.p(1) - 1) < 1e-12, 'p spans exactly the fall budget', `p(1)=${map.p(1).toFixed(6)}`);
+    let mono = true, prevT = -1, prevP = -1;
+    for (let i = 0; i <= 670; i++) {
+      const t01 = i / 670;
+      const h = map.heroT(t01), q = map.p(t01);
+      if (h < prevT - 1e-12 || q < prevP - 1e-12) mono = false;
+      prevT = h; prevP = q;
+    }
+    ok(mono, 'the map is monotonic — no scroll position can rewind the other story');
+  }
+  // the linear split form stays valid as the tools' fallback (same shape, old math)
+  ok(Math.abs(FALL.split - 3400 / 5600) < 1e-12, 'legacy split fallback still resolves (tools use it)', FALL.split.toFixed(5));
+  ok(heroTime(0) === 0 && heroTime(FALL.split) === 1 && heroTime(1) === 1, 'legacy hero input: 1:1 to split, latched after', `${heroTime(FALL.split * 0.5).toFixed(3)} at half-hero`);
+  ok(heroTime(0.3) === THREE.MathUtils.clamp(0.3 / FALL.split, 0, 1), 'legacy hero input is linear in px before the split');
+  ok(measureFall(FALL.split - 1e-9).p === 0, 'p is zero across the whole hero budget');
+  ok(measureFall(1).p === 1 && measureFall(FALL.split).p === 0, 'p spans exactly the fall budget');
+  let mono4 = true;
+  let prev = { p: -1, cam: -1 };
+  for (let i = 0; i <= 200; i++) {
+    const s = measureFall(i / 200);
+    if (s.p < prev.p - 1e-12 || s.camDepth < prev.cam - 1e-12) mono4 = false;
+    prev = { p: s.p, cam: s.camDepth };
+    if (s.flare < 0 || s.flare > 1.001) mono4 = false; // bounded envelope, never an explosion
+  }
+  ok(mono4, 'p, camera depth and the flare envelope stay bounded/monotonic across 0→1');
+  const b = FALL.beats;
+  ok(b.collapse[0] >= b.flare[0] && b.fall >= b.collapse[0] && b.fall < b.collapse[1] + 0.05 && b.blend[0] < b.fall, 'beat order: catch → flare/collapse → lift → blend', JSON.stringify(b));
+  ok(Math.abs(FALL.camera.drop - (1.42 + 16.9)) < 0.02, 'camera drop lands y ≈ −16.9 by p = 1', FALL.camera.drop.toFixed(2));
+  ok(Math.abs(FALL.ground.riftWidth - 5.9) < 1e-9 && FALL.camera.fov[1] === 45.5 && FALL.camera.fov[0] === 37, 'spec anchors: 5.9 m rift, FOV 37 → 45.5');
+}
+
+console.log('\n— scene 4: the fall layer on the real modules —');
+{
+  const scene4 = new THREE.Scene();
+  scene4.fog = new THREE.Fog(0x101724, 2.6, 15);
+  const star4 = createStar();
+  const lights = {};
+  for (const [k, v] of Object.entries({ key: 1.5, rim: 2.9, rim2: 1.35, bounce: 0.55, wash: 22, canvasGlow: 6 })) {
+    const l = new THREE.Object3D();
+    l.intensity = v;
+    lights[k] = l;
+  }
+  const layer = createFallLayer({ scene: scene4, camera, renderer: null, artist, star: star4, split: FALL.split, lights });
+  const tFor = (p) => FALL.split + p * (1 - FALL.split);
+  const runFrame = (totalT, elapsed = 1.0) => {
+    rig.update(heroTime(totalT, FALL.split), 1 / 60);
+    const s3 = measureScene3(rig.t);
+    star4.update(s3, elapsed, 1 / 60);
+    artist.update(elapsed, 1 / 60, s3, star4.anchor);
+    lights.canvasGlow.intensity = THREE.MathUtils.lerp(6, 6 * 0.78, s3.notice);
+    return layer.update(totalT, elapsed, 1 / 60, s3, rig);
+  };
+  const run = (totalT, frames) => {
+    let s4;
+    for (let i = 0; i < frames; i++) s4 = runFrame(totalT);
+    artist.group.updateMatrixWorld(true);
+    camera.updateMatrixWorld(true);
+    return s4;
+  };
+  const snap = () =>
+    JSON.stringify({
+      cam: camera.position.toArray().map((n) => +n.toFixed(9)),
+      // fov rounded: rig.update's own 1e-4 write-hysteresis can strand it 7e-5° off; not Scene 4's doing
+      fov: +camera.fov.toFixed(4),
+      fig: artist.figure.position.toArray().map((n) => +n.toFixed(9)),
+      figR: [artist.figure.rotation.x, artist.figure.rotation.y, artist.figure.rotation.z].map((n) => +n.toFixed(9)),
+      knee: artist.parts.legs.right.knee.rotation.x,
+      hip: artist.parts.legs.right.hip.rotation.x,
+      tool: artist.parts.rightArm.tool.rotation.x,
+      propsY: artist.props.position.y,
+      fog: [scene4.fog.near, scene4.fog.far, scene4.fog.color.getHexString()],
+      glow: lights.canvasGlow.intensity,
+      key: lights.key.intensity,
+      halo: star4.layers.halo.material.opacity,
+      floor: [layer.floor.left.position.x, layer.floor.right.position.x],
+    });
+
+  // dormancy: with vs without the (asleep) layer, same pipeline → identical state
+  run(tFor(0), 900);
+  const withLayer = snap();
+  for (let i = 0; i < 900; i++) {
+    rig.update(1, 1 / 60);
+    const s3 = measureScene3(rig.t);
+    star4.update(s3, 1, 1 / 60);
+    artist.update(1, 1 / 60, s3, star4.anchor);
+    lights.canvasGlow.intensity = THREE.MathUtils.lerp(6, 6 * 0.78, s3.notice);
+  }
+  artist.group.updateMatrixWorld(true);
+  camera.updateMatrixWorld(true);
+  ok(withLayer === snap(), 'at p = 0 the layer is dormant: every channel it can write is byte-identical to the Scenes 1–3 pipeline');
+  ok(layer.floor.left.position.x === -FALL.ground.hinge && layer.floor.right.position.x === FALL.ground.hinge, 'floor halves sit flush (no visible seam) before the fall');
+  ok(star4.layers.halo.material.opacity <= 1.0001, 'star opacity is clamped ≤ 1 through the flare', star4.layers.halo.material.opacity.toFixed(3));
+
+  // catch closes toward the star before support breaks
+  run(tFor(0), 300);
+  const hand0 = worldOf(artist.parts.rightArm.hand).distanceTo(STAR.position);
+  run(tFor(0.035), 600); // the catch moment: before the collapse carries him down
+  const handC = worldOf(artist.parts.rightArm.hand);
+  const tipC = new THREE.Vector3();
+  artist.parts.rightArm.tool.children[2].getWorldPosition(tipC);
+  ok(hand0 - handC.distanceTo(STAR.position) > 0.3, 'catch moves the hand toward the star (closes the gap)', `${hand0.toFixed(3)}m → ${handC.distanceTo(STAR.position).toFixed(3)}m`);
+  ok(tipC.distanceTo(STAR.position) < 1.6, '…and brings the brush tip near it — reaching to meet, flare bridging', `${tipC.distanceTo(STAR.position).toFixed(2)}m`);
+  const aimErr = THREE.MathUtils.radToDeg(
+    Math.acos(THREE.MathUtils.clamp(tipC.clone().sub(handC).normalize().dot(STAR.position.clone().sub(handC).normalize()), -1, 1))
+  );
+  ok(aimErr < 16, 'the brush points at the star at the catch', `${aimErr.toFixed(1)}° off`);
+
+  // the floor wrenches open sharply, then creeps
+  run(tFor(1), 1200);
+  const gap = layer.floor.right.position.x - layer.floor.left.position.x - 2 * FALL.ground.hinge;
+  ok(Math.abs(gap - FALL.ground.riftWidth) < 0.05, 'rift is 5.9 m across at full open', `${gap.toFixed(2)}m`);
+  ok(layer.floor.left.position.y < -4 && layer.floor.right.position.y < -4, 'halves sink sharply, not gently', `${layer.floor.left.position.y.toFixed(2)}m`);
+  ok(Math.abs(layer.floor.left.rotation.z) > 0.07, 'hinged, not just slid', `${THREE.MathUtils.radToDeg(layer.floor.left.rotation.z).toFixed(1)}°`);
+  const bc0 = FALL.beats.collapse[0], bc1 = FALL.beats.collapse[1];
+  const openIn = measureFall(tFor(bc1)).openW - measureFall(tFor(bc0)).openW;
+  ok(openIn / measureFall(1).openW > 0.7, 'most of the opening happens inside the sharp collapse window', `${(openIn * 100).toFixed(0)}% by p=${bc1.toFixed(2)}`);
+  ok(artist.props.position.y < -8, 'the easel rides the collapsing centre down into the dark', `${artist.props.position.y.toFixed(2)}m`);
+
+  // camera: lurch, acceleration, end state; artist drifts up while falling deeper
+  run(tFor(0), 700);
+  const camBase = camera.position.clone();
+  ok(Math.abs(camBase.y - 1.42) < 0.01, 'camera starts at the Scene-3 end height', camBase.y.toFixed(3));
+  const s4a = run(tFor(0.21), 700);
+  ok(s4a.camDepth > 0.35 * FALL.camera.drop, 'a sharp lurch: >35% of the depth arrives in the first 0.135 of p', `${s4a.camDepth.toFixed(1)}m`);
+  const mid = run(tFor(0.45), 900);
+  const midHeadN = worldOf(artist.parts.head).project(camera);
+  ok(Math.abs(midHeadN.x) < 0.85 && midHeadN.y > -0.5 && midHeadN.y < 0.9, 'artist readable through the first part of the fall', `head ndc ${midHeadN.x.toFixed(2)}, ${midHeadN.y.toFixed(2)}`);
+  void mid;
+  const end = run(tFor(1), 1500);
+  ok(Math.abs(camera.position.y + 16.9) < 0.05, 'camera lands at y ≈ −16.9 m', camera.position.y.toFixed(2));
+  ok(Math.abs(camera.fov - 45.5) < 0.05, 'FOV ends on 45.5°', camera.fov.toFixed(1));
+  const endHead = worldOf(artist.parts.head);
+  const nEnd = endHead.clone().project(camera);
+  ok(nEnd.y > 0.5 && Math.abs(nEnd.x) < 0.88, 'late in the fall he drifts UP in frame (falling deeper than the camera)', `ndc ${nEnd.x.toFixed(2)}, ${nEnd.y.toFixed(2)}`);
+  ok(endHead.y - camera.position.y < -2.2, '…because he is genuinely below the camera', `${(endHead.y - camera.position.y).toFixed(2)}m`);
+  ok(end.p > 0.99999, 'p reaches 1 at the end of the pin (damping converges to it, exactly like rig.t does)', end.p.toFixed(6));
+
+  // star flare + distance fade; lights/fog toward black — sampled at the flare's
+  // mid-window peak (the beat front-loads while the star is still in frame)
+  run(tFor(0), 400);
+  const baseLight = star4.light.intensity;
+  run(tFor((FALL.beats.flare[0] + FALL.beats.flare[1]) / 2), 700); // peak of the sin-shaped flare envelope = window mid
+  ok(star4.light.intensity > baseLight * 1.8, 'the star flares bright at the catch moment', `${star4.light.intensity.toFixed(1)} vs ${baseLight.toFixed(1)}`);
+  run(tFor(1), 1500);
+  ok(star4.light.intensity < 0.05 && star4.layers.halo.material.opacity < 0.02, '…then fades with distance to nothing', `L ${star4.light.intensity.toFixed(3)} halo ${star4.layers.halo.material.opacity.toFixed(3)}`);
+  ok(lights.key.intensity < 1.5 * 0.21 && lights.key.intensity > 1.5 * 0.15, 'studio lights dim to the floor value (≈18%)', lights.key.intensity.toFixed(2));
+  ok(scene4.fog.far < 8 && scene4.fog.near < 0.6 && scene4.fog.color.getHexString() === '000000', 'fog tightens to near-black at the bottom', `far ${scene4.fog.far}`);
+
+  // reversal: the whole excursion unwinds to exactly the dormant state
+  const before = run(tFor(0), 900) && snap();
+  run(tFor(1), 1600);
+  run(tFor(0.5), 400);
+  const after = run(tFor(0), 2400) && snap();
+  ok(before === after, 'scroll down-to-1 (via 0.5) and back to 0 restores camera/artist/floor/fog/lights/star byte-for-byte');
 }
 
 console.log('\n— easel readability in the settled shot —');

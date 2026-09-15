@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Scroll-driven cinematic hero: camera orbits an artist at his easel (Scenes 1-2).",
+  "description": "Scroll-driven cinematic hero: orbit an artist at his easel, a star appears, he falls into the void (Scenes 1-4).",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
