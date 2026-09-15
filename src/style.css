@@ -4,8 +4,8 @@
    The pin is ONE section scrolled through three budgets: --reveal-scroll runs
    Scenes 1–2's camera move (it equals the old 3400 px hero budget up to the
    side view settling — same pixels, same timing), --story-scroll gives Scene 3's
-   star/notice/reach beat its own room, and --fall-scroll is Scene 4. main.js
-   reads all three and derives
+   star/notice/reach beat its own room, --fall-scroll is Scene 4, and --abyss-scroll
+   is the Scene 5–6 travel through the coding abyss. main.js reads all four and derives
    `split`, so they can each be tuned in exactly one place.
    ------------------------------------------------------------------ */
 
@@ -20,6 +20,9 @@
      Split math keeps Scenes 1–3 on their original pixels no matter what. */
   /* Scene 4's budget: the fall from the star's edge into the void (px) */
   --fall-scroll: 2200px;
+  /* Scenes 5–6: the travel through the coding abyss (px). Appended after the fall —
+     it cannot move any earlier frame. ~2–3 viewport lengths of pure descent. */
+  --abyss-scroll: 2800px;
   --bg-deep: #04050a;
   --bg-mid: #0e131d;
   --bg-glow: #23304a;
@@ -88,12 +91,13 @@ body {
     --reveal-scroll: 1300px;
     --story-scroll: 1700px;
     --fall-scroll: 1500px;
+    --abyss-scroll: 1900px;
   }
 }
 
 #scroll-space {
   /* MUST stay transparent: the fixed/absolute canvas reads through it.
      Give your own sections an opaque background when you add the abyss / projects. */
-  height: calc(var(--reveal-scroll) + var(--story-scroll) + var(--fall-scroll));
+  height: calc(var(--reveal-scroll) + var(--story-scroll) + var(--fall-scroll) + var(--abyss-scroll));
   background: transparent;
 }

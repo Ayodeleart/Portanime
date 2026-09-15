@@ -1,13 +1,16 @@
-# Scroll-driven cinematic hero — Scenes 1, 2, 3 & 4
+# Scroll-driven cinematic hero — Scenes 1 → 6
 
 One pinned section, one scroll, one camera move: an **extreme close-up on the back of a
 painter's head** → **orbiting and pulling out to a side-profile two-shot at his easel** →
 late in that same move **a small light appears beyond the canvas**, he stops painting, turns
 toward it and shifts a half step closer — and as he reaches, **the ground breaks open and he
-falls** into a black placeholder void. Scroll up and all of it unwinds, frame-for-frame.
+falls**. On the way down **his silhouette shatters into code**, and the scroll carries on
+**through a deep procedural programming abyss** that starts chaotic and organises itself
+into glowing data paths. Scroll up and all of it unwinds, frame-for-frame.
 
-The fall is in (Scene 4). The code-tunnel abyss and the project sections are still out of scope, on
-purpose — Scene 4’s bottom is a deliberately deep black placeholder built for the future void.
+The fall (Scene 4) and the shatter + coding abyss (Scenes 5–6) are in. Still deliberately out
+of scope, on purpose: the red line, the white-background doorway and the project sections —
+the abyss's organised bottom is where the red line will pick the story up.
 
 ## Run
 
@@ -37,6 +40,7 @@ so it can never be occluded away. With `?debug` absent no marker object is even 
 | `src/loft.js` | geometry helpers: loft through elliptical rings, limbs from joint pivots |
 | `src/star.js` | Scene 3's light: crystal core, nucleus, halo, flare, point light, dust |
 | `src/scene3.js` | Scene 3's *timing map* — when the star, the notice and the reach happen |
+| `src/scene5.js` | Scenes 5–6: the figure shatter (instanced shards/glyphs/lines/motes) + the coding abyss shaft — chaos → lattice, all pure functions of `a` |
 | `src/scene4.js` | Scene 4 (the fall): split math, the two-floor slab, flare/fade, the camera plunge, the void — every value a pure function of local `p` |
 | `src/style.css` | fullscreen canvas, 100vh pinned `#hero`, the three scroll budgets (`--reveal-scroll`, `--story-scroll`, `--fall-scroll`) |
 
@@ -49,10 +53,13 @@ Four ideas carry the whole feel:
    radius grows 0.85 m → 3.55 m; `targetCurve` slides the aim from just past his shoulder to
    between artist and canvas. The orbit never passes in front of him, so the face is never
    readable: Scene 1 is a back-of-head close-up, Scene 2 a profile.
-3. **The pin is one scroll split into three named budgets.** `--reveal-scroll` (2108px)
+3. **The pin is one scroll split into four named budgets.** `--reveal-scroll` (2108px)
    runs Scenes 1–2, `--story-scroll` (2400px) runs Scene 3's beat, `--fall-scroll` (2200px)
-   runs Scene 4 — still *one* ScrollTrigger, one pin, one `t`. `buildScrollMap()` in
-   `scene4.js` turns the pin into the two inputs: `heroT` (Scenes 1–3) and `p` (Scene 4).
+   runs Scene 4 and `--abyss-scroll` (2800px) runs the Scenes 5–6 travel — still *one*
+   ScrollTrigger, one pin, one `t`. `buildScrollMap()` in `scene4.js` turns the pin into
+   three inputs: `heroT` (Scenes 1–3), `p` (Scene 4) and `a` (Scene 5). Segments are defined
+   by PIXELS, so appending a budget can never move an earlier frame — check-shot proves it
+   (`Scenes 1–4 keep every pixel: heroT/p identical with or without the abyss budget`).
    Below 2108px the map has exactly the OLD 1/3400 px slope — every pre-Scene-3 frame keeps
    the pixels it always had (`npm run check` asserts that to 1e-12) — and Scene 4's
    post-pass still writes nothing at all until `p > 0`.
@@ -92,6 +99,25 @@ The windows are front-loaded on purpose: the dive carries the star out of frame 
 few hundred pixels, so the flare and the loss of the light play *while it is still
 visible* — that is the beat the fall answers.
 
+### Scenes 5–6: the shatter + the coding abyss (local `a` over the 2800px abyss budget)
+
+| when | px / p | what happens |
+| --- | --- | --- |
+| `p 0.45 → 0.82` (during the fall, before `a` exists) | 6498 → 6708 | **the shatter**: the figure dissolves into instanced dark shards, glowing glyph sprites, thin data lines and motes — all parented to the artist, so they ride the fall. The body's own meshes blink out per-mesh behind the dissolve (head/hair last); the glow systems render ABOVE Scene 4's closing veil (renderOrder 6 vs 3) so the code light visibly escapes the dark while the matter sinks into it |
+| `a 0 → 0.06` | 6708 → 6876 | the veil opens, fog re-arms to corridor depth, exposure recovers; the camera keeps falling `a × 120 m` past Scene 4's floor |
+| `a 0.05 → 0.5` | → 8108 | `dens`: the stream/panel/mote budgets ramp 35 % → 100 % — sparse and violent becomes crowded |
+| `a 0.45 → 0.95` | 7968 → 9388 | `org`: chaos lerps into the lattice — glyph columns snap to 24 radial columns, data lines straighten into long vertical paths, panels turn to face the shaft axis in aligned rows, grid/wire fragments flatten and square up |
+| `a 0.62 → 1` | 8444 → 9508 | `chaosFade`: the noisy layers (lines, grids, wires, motes) thin by up to 50 % and flicker halves — the shaft ends CLEAN: glowing organised columns with dark vertical room between them |
+| reverse | any | everything is a closed-form function of scroll — nothing accumulates, `a → 0` restores Scene 4's latched frame byte-for-byte (guarded) |
+
+All content is **generated generic fragments** (`ABYSS.glyphsA/B`, `ABYSS.snippets`) — no
+copyrighted code dumps, no real client code. The systems are 4 instanced glyph/shard meshes,
+1 instanced panel family ×6 textures, 1 far-layer instanced mesh, 2 batched `LineSegments`
+buffers (data lines, grid + wire tiles) and 2 `Points` clouds — **~16 draw calls for the
+whole shaft**, every instance matrix wrapped ±44 m around the camera so one fixed budget
+reads as an infinite corridor. Heavy rewrites run only when `a` actually moves, so a scroll
+stop is a single frozen frame; the time term is opacity flicker only.
+
 ## Tuning
 
 - **Framing / curve** → `CAMERA_KEYS`, `TARGET_KEYS`, `FOV_KEYS` in `camera-path.js`.
@@ -100,8 +126,9 @@ visible* — that is the beat the fall answers.
   `'keyframe'` gives each key equal scroll so the close-up lingers. `npm run check` asserts
   these keys verbatim — if you change them on purpose, change them there too.
 - **Scroll length / speed** → `--reveal-scroll` (2108px, 1300px small screens),
-  `--story-scroll` (2400px, 1700px) and `--fall-scroll` (2200px, 1500px) in `style.css`.
-  `main.js` reads all three and `buildScrollMap` composes them, so each budget is edited in
+  `--story-scroll` (2400px, 1700px), `--fall-scroll` (2200px, 1500px) and
+  `--abyss-scroll` (2800px, 1900px) in `style.css` — 9508px desktop / 6400px mobile pin.
+  `main.js` reads all four and `buildScrollMap` composes them, so each budget is edited in
   exactly one place. `--reveal-scroll` = `0.62 × the old 3400px hero budget` — keep that
   ratio or Scenes 1–2's pixels move (check-shot asserts it). `CONFIG.scrub` and `PATH.damping` add inertia
   on top — the fall damps with the same λ, so reversals stay symmetrical.
@@ -131,6 +158,21 @@ visible* — that is the beat the fall answers.
   `node tools/.fall-probe.mjs` prints the whole curve table for tuning, and
   `node tools/.visual-proof.mjs` raster-composites the beat headlessly (star/head/hand/tip
   px metrics + PNGs in ./.proof) — no browser needed.
+- **The shatter + the abyss** → `ABYSS` in `src/scene5.js` (one config block, everything
+  named): `travel`/`band` set the shaft scale; `shatter.win` decides when the body breaks up
+  (keep it inside Scene 4's window so the veil darkening reads as *absorption*, not exit);
+  `counts` + `mobileScale` are the perf budget; `weights.{veil,fog,densUp,org,chaosFade}`
+  are the five envelopes that shape the fall-through; `colors`/`alpha` the palette;
+  `lattice` the ordered destination. Dissolve amount/speed for a gentler or harsher shatter
+  = `shatter.win` + `shatter.drift` + `shatter.glowMix`. `node tools/.visual-proof.mjs` now
+  includes stops `10-shatter` → `14-bottom` for eyeballing it headlessly.
+- **Red-line handoff (later scene)** → the late abyss is deliberately built as its
+  predecessor: the lattice is a ring of 24 vertical columns at radius 5.5–13.5 m around the
+  descent axis, `org = 1` has already straightened every line into vertical paths, and
+  `chaosFade` clears the space between them. A future Scene 7 can read `ABYSS.lattice` +
+  `abyssWeights(a)` to run a single red path down the shaft's centre (or along one column)
+  and fade the background white as `a` finishes — nothing needs to move first. No red exists
+  in `ABYSS.colors` on purpose; add it there when the time comes.
 - **When he notices** → `SCENE3` in `src/scene3.js`: the three `[start, end]` windows, plus
   `step` (0.21 m), `lean` (0.09 rad) and `bob`. Ranges are in `t`, not pixels, so they
   survive any budget — what gives the beat its air is the story budget on top. The windows

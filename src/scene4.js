@@ -43,7 +43,7 @@ export const FALL = {
   /** px budgets — the truth lives in style.css (--reveal-scroll, --story-scroll,
    *  --fall-scroll); main.js reads them and builds the scroll map at runtime.
    *  These are the fallback + documentation. */
-  scroll: { reveal: 2108, story: 2400, fall: 2200 },
+  scroll: { reveal: 2108, story: 2400, fall: 2200, abyss: 2800 },
   /** legacy two-way split, kept so the linear helpers/tests still resolve */
   split: 3400 / 5600,
   /** heroT at which the Scenes 1–2 reveal ends == SCENE3.appear[0]; the reveal
@@ -175,14 +175,19 @@ export const heroTime = (t, split = FALL.split) => THREE.MathUtils.clamp(t / spl
  *        (--story-scroll)                                notice, reach) on its own
  *                                                        stretched budget — the story
  *                                                        breathes here
- *   px reveal+story → total  p 0 → 1                     Scene 4's fall
+ *   px reveal+story → +fall   p 0 → 1                     Scene 4's fall
  *        (--fall-scroll)
+ *   px +fall → total          a 0 → 1                     Scene 5's abyss travel
+ *        (--abyss-scroll)                                  (p stays latched at 1: the
+ *                                                          void holds while the abyss runs)
  *
  * Monotonic and continuous; flat latches at each end. main.js builds this from the
  * CSS variables; everything downstream (rig input, Scene-3 windows, the fall) reads it.
+ * Adding an abyss budget can NEVER move an earlier frame: every segment is defined by
+ * PIXELS, and the heroT/p formulas ignore totalPx above their own breakpoints.
  */
-export function buildScrollMap({ revealPx = FALL.scroll.reveal, storyPx = FALL.scroll.story, fallPx = FALL.scroll.fall, revealEndT = FALL.revealEndT } = {}) {
-  const totalPx = revealPx + storyPx + fallPx;
+export function buildScrollMap({ revealPx = FALL.scroll.reveal, storyPx = FALL.scroll.story, fallPx = FALL.scroll.fall, abyssPx = FALL.scroll.abyss, revealEndT = FALL.revealEndT } = {}) {
+  const totalPx = revealPx + storyPx + fallPx + abyssPx;
   const heroT = (t) => {
     const px = THREE.MathUtils.clamp(t, 0, 1) * totalPx;
     if (px <= revealPx) return (px / revealPx) * revealEndT; // px-identical to the old /3400 slope when revealPx = revealEndT·3400
@@ -193,7 +198,11 @@ export function buildScrollMap({ revealPx = FALL.scroll.reveal, storyPx = FALL.s
     const px = THREE.MathUtils.clamp(t, 0, 1) * totalPx;
     return THREE.MathUtils.clamp((px - revealPx - storyPx) / fallPx, 0, 1);
   };
-  return { totalPx, revealPx, storyPx, fallPx, revealEndT, heroT, p };
+  const a = (t) => {
+    const px = THREE.MathUtils.clamp(t, 0, 1) * totalPx;
+    return THREE.MathUtils.clamp((px - revealPx - storyPx - fallPx) / abyssPx, 0, 1);
+  };
+  return { totalPx, revealPx, storyPx, fallPx, abyssPx, revealEndT, heroT, p, a };
 }
 
 /** one descent curve: the lurch share arrives fast, the rest accelerates with pow(). */
@@ -485,6 +494,12 @@ export function createFallLayer(ctx) {
 
   return {
     floor,
+    /** the void veil mesh — Scene 4 owns its opacity while p runs; Scene 5 may open it
+     *  during the abyss travel (never before a > 0), so the handle is exposed. */
+    veil,
+    get cur() {
+      return cur;
+    },
     get s4() {
       return s4;
     },
