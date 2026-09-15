@@ -103,53 +103,53 @@ const tipC = new THREE.Vector3();
 artist.parts.rightArm.tool.children[2].getWorldPosition(tipC);
 console.log(`catch: hand→star  ${d0.toFixed(3)}m → ${handC.distanceTo(STAR.position).toFixed(3)}m   tip→star ${tipC.distanceTo(STAR.position).toFixed(3)}m`);
 
-// ── catch solver: search FALL_POSE.catchArm deltas so the hand closes toward the
-//    star AND the brush tip points at it (the "reaches to meet it" read) ──
+// ── catch solver: search FALL_POSE.catchArm deltas so the hand AND brush tip close
+//    on the star at full catch weight (the "reaches to meet it" read) ──
 if (process.argv.includes('--solve')) {
   const zero = { ...FALL_POSE.catchArm };
-  Object.assign(FALL_POSE.catchArm, { pivotX: 0, pivotY: 0, pivotZ: 0, elbowX: 0, toolX: 0, chestLeanX: 0 });
-  run(tFor(0.065), 160); // base pose at the catch moment with no catch deltas
+  FALL_POSE.catchArm.win = [0.002, 0.03]; // committed before the floor-drop starts carrying him
+  Object.assign(FALL_POSE.catchArm, { pivotX: 0, pivotY: 0, pivotZ: 0, elbowX: 0, toolX: 0, chestLeanX: 0.1 });
+  const tC = tFor(0.035);
+  run(tC, 300); // base pose at the catch moment: s3 reach + fall W, catch deltas zero
   const A = artist.parts.rightArm;
-  const base = {
-    px: A.pivot.rotation.x, py: A.pivot.rotation.y, pz: A.pivot.rotation.z, ex: A.elbow.rotation.x,
-    tip: worldOf(A.tool.children[2]).clone(), hand: worldOf(A.hand).clone(), sh: worldOf(A.pivot).clone(),
-  };
   const starV = STAR.position;
-  const dir = starV.clone().sub(base.sh).normalize(); // the axis the hand should travel along
-  const evaluate = (px, py, pz, ex) => {
-    A.pivot.rotation.set(base.px + px, base.py + py, base.pz + pz);
-    A.elbow.rotation.x = base.ex + ex;
+  const measure = () => {
     artist.group.updateMatrixWorld(true);
     const hand = worldOf(A.hand);
     const tip = worldOf(A.tool.children[2]);
-    // reach: projection of (hand − shoulder) onto the star axis — maximise → minimise −proj
-    const proj = hand.clone().sub(base.sh).dot(dir);
-    // pointing: brush tip must stay roughly on the line hand → star (soft, one-sided)
-    const aim = tip.clone().sub(hand).normalize();
-    const toStar = starV.clone().sub(hand).normalize();
-    const ang = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(aim.dot(toStar), -1, 1)));
-    return -proj + 0.03 * Math.pow(Math.max(0, ang - 10), 2) * 0.01;
+    const aim = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(
+      tip.clone().sub(hand).normalize().dot(starV.clone().sub(hand).normalize()), -1, 1)));
+    return { hand: hand.clone(), tip: tip.clone(), d: hand.distanceTo(starV) + tip.distanceTo(starV) + 0.02 * Math.max(0, aim - 6) };
   };
-  let best = { px: 0, py: 0, pz: 0, ex: 0, v: evaluate(0, 0, 0, 0) };
-  const sweep = (cx, cy, cz, ce, step) => {
-    for (const px of [cx - step, cx, cx + step]) for (const py of [cy - step, cy, cy + step])
-      for (const pz of [cz - step, cz, cz + step]) for (const ex of [ce - step, ce, ce + step]) {
-        const v = evaluate(px, py, pz, ex);
-        if (v < best.v) best = { px, py, pz, ex, v };
+  const apply = (px, py, pz, ex, tx) => {
+    A.pivot.rotation.x = baseX + px; A.pivot.rotation.y = baseY + py; A.pivot.rotation.z = baseZ + pz;
+    A.elbow.rotation.x = baseE + ex;
+    if (A.tool) A.tool.rotation.x = FPB.toolRotX + tx; // FPB: bases — matches scene4 layer
+  };
+  const baseX = A.pivot.rotation.x, baseY = A.pivot.rotation.y, baseZ = A.pivot.rotation.z, baseE = A.elbow.rotation.x;
+  const FPB = FALL_POSE.bases;
+  let best = { ...measure(), px: 0, py: 0, pz: 0, ex: 0, tx: 0 };
+  const sweep = (step) => {
+    let improved = true;
+    while (improved) {
+      improved = false;
+      for (const [k, scale] of [['px', 1], ['py', 1], ['pz', 1], ['ex', 1], ['tx', 1]]) {
+        for (const dir of [-1, 1]) {
+          const cand = { ...best, [k]: best[k] + dir * step };
+          apply(cand.px, cand.py, cand.pz, cand.ex, cand.tx);
+          const m = measure();
+          if (m.d < best.d - 1e-6) { best = { ...best, ...m, [k]: cand[k] }; improved = true; }
+        }
       }
+    }
+    if (step > 0.02) sweep(step * 0.5);
   };
-  for (const s of [0.8, 0.4, 0.2, 0.1, 0.05, 0.02]) sweep(best.px, best.py, best.pz, best.ex, s);
-  A.pivot.rotation.set(base.px + best.px, base.py + best.py, base.pz + best.pz);
-  A.elbow.rotation.x = base.ex + best.ex;
-  artist.group.updateMatrixWorld(true);
-  const hand = worldOf(A.hand);
-  const tip = worldOf(A.tool.children[2]);
-  const ang = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(tip.clone().sub(hand).normalize().dot(starV.clone().sub(hand).normalize()), -1, 1)));
-  const reach = hand.clone().sub(base.sh).dot(dir);
-  console.log(`  dbg: sh ${base.sh.toArray().map((n) => n.toFixed(3))} |sh→star| ${base.sh.distanceTo(STAR.position).toFixed(3)} |sh→hand| ${base.sh.distanceTo(hand).toFixed(3)} hand ${hand.toArray().map((n) => n.toFixed(3))}`);
-  console.log(`SOLVED catchArm: pivotX ${best.px.toFixed(3)}, pivotY ${best.py.toFixed(3)}, pivotZ ${best.pz.toFixed(3)}, elbowX ${best.ex.toFixed(3)}`);
-  console.log(`  hand→star ${hand.distanceTo(STAR.position).toFixed(3)}m (was ${d0.toFixed(3)})  extension along star axis ${reach.toFixed(3)}m  aim error ${ang.toFixed(1)}°  tip→star ${tip.distanceTo(STAR.position).toFixed(3)}m`);
-  Object.assign(FALL_POSE.catchArm, zero);
+  sweep(0.5);
+  apply(best.px, best.py, best.pz, best.ex, best.tx);
+  const m = measure();
+  const aimFinal = THREE.MathUtils.radToDeg(Math.acos(THREE.MathUtils.clamp(m.tip.clone().sub(m.hand).normalize().dot(starV.clone().sub(m.hand).normalize()), -1, 1)));
+  console.log(`SOLVED catchArm: pivotX ${best.px.toFixed(3)}, pivotY ${best.py.toFixed(3)}, pivotZ ${best.pz.toFixed(3)}, elbowX ${best.ex.toFixed(3)}, toolX ${best.tx.toFixed(3)}, chestLeanX 0.1`);
+  console.log(`  hand→star ${m.hand.distanceTo(starV).toFixed(3)}m  tip→star ${m.tip.distanceTo(starV).toFixed(3)}m  aim ${aimFinal.toFixed(1)}°`);
   process.exit(0);
 }
 
