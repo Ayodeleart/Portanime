@@ -68,6 +68,12 @@ import { createFallLayer, FALL, buildScrollMap } from './scene4.js';
 import './style.css';
 
 gsap.registerPlugin(ScrollTrigger);
+// Mobile fix for the whole-screen shake while scrolling: iOS/Android resize the visible
+// viewport as the address bar hides/shows mid-scroll, which was re-triggering ScrollTrigger's
+// layout refresh and yanking the pin. This only smooths the SCROLL MECHANISM — it doesn't touch
+// FALL/FALL_POSE in scene4.js, so the fall itself stays exactly as rough as it's tuned to be.
+ScrollTrigger.config({ ignoreMobileResize: true });
+ScrollTrigger.normalizeScroll(true);
 
 /* ───────────────────────────── config ───────────────────────────── */
 
