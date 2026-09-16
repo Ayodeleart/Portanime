@@ -1,10 +1,22 @@
 /* =============================================================================
- *  SCROLL-DRIVEN CINEMATIC HERO — Scenes 1, 2 and 3
- *  One pinned section, one scroll, one camera move, three beats:
+ *  SCROLL-DRIVEN CINEMATIC HERO — Scenes 1, 2, 3 and 4
+ *  One pinned section, one scroll, one camera move, four beats:
  *    Scene 1  extreme close-up on the back of a painter's head/shoulder (no face)
  *    Scene 2  orbit + zoom-out settling beside him, side-profile against the easel
- *    Scene 3  a light appears beyond the canvas late in the SAME move, he notices it,
- *             stops painting and shifts a step closer as the scroll finishes
+ *    Scene 3  a light appears over the canvas at the END of the SAME move — on its own
+ *             2400px story budget: it sits, he turns (~40°), he steps and reaches before anything falls
+ *    Scene 4  the fall: the floor breaks open under him and the camera plunges after
+ *             him; Scene 5  he shatters into code on the way down and the scroll keeps
+ *             falling through a procedural coding abyss that organises itself;
+ *             Scene 6  the ordered code drains into a red line that draws itself across
+ *             a clean white world, tracked by the camera, ending at an open doorway
+ *  The pin now scrolls reveal(2108) + story(2400) + fall(2200) + abyss(2800) + line(2600) = 12108px.
+ *  A single piecewise map (scene4.js buildScrollMap) turns the pin into heroT and
+ *  fall-local p: Scenes 1–2 run at their ORIGINAL 1/3400 px slope until the side
+ *  view settles, Scene 3's beat then owns a stretched 2400px budget so the star,
+ *  the turn and the reach are visible on a phone, and Scene 4 keeps its 2200px.
+ *  Scene 4 only POST-PASSES on top (see src/scene4.js) — camera-path.js is
+ *  untouched by design.
  *  Scrolling up reverses all of it (GSAP scrub + damping in the render loop).
  *
  *  ── RUN ────────────────────────────────────────────────────────────────────
@@ -31,7 +43,10 @@
  *  1. THE CAMERA CURVE → src/camera-path.js  (CAMERA_KEYS / TARGET_KEYS / FOV_KEYS).
  *       UNCHANGED by Scene 3, deliberately: the new beats are mapped onto the tail of
  *       the same normalised t, so the pin, the scrub and the timing are untouched.
- *  2. SCROLL LENGTH → src/style.css `--hero-scroll` (3400px), read by main.js.
+ *  2. SCROLL LENGTH → src/style.css `--reveal-scroll` + `--story-scroll` + `--fall-scroll`
+ *     + `--abyss-scroll` + `--line-scroll` (2108+2400+2200+2800+2600px desktop), read by
+ *     main.js and composed by scene4.js buildScrollMap. Scenes 1–2 keep the exact
+ *     1/3400 px slope below 2108 — never retime that segment casually.
  *  3. WHEN SCENE 3 HAPPENS → `SCENE3` in src/scene3.js: appear / notice / reach are
  *       [start, end] windows of t. Everything else (fade, head turn, frozen brush,
  *       step distance) is a pure function of that map, so scrolling back is exact.
@@ -53,6 +68,9 @@ import { createArtist, MARKS } from './artist.js';
 import { createCameraRig, PATH } from './camera-path.js';
 import { createStar, STAR } from './star.js';
 import { measureScene3, SCENE3 } from './scene3.js';
+import { createFallLayer, FALL, buildScrollMap } from './scene4.js';
+import { createAbyssLayer, ABYSS } from './scene5.js';
+import { createRedLineLayer, RED } from './scene6.js';
 import './style.css';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -74,12 +92,35 @@ const cssNumber = (name, fallback) => {
   const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
   return Number.isFinite(v) ? v : fallback;
 };
-/** single source of truth for how far you scroll: --hero-scroll in style.css */
-const scrollLength = cssNumber('--hero-scroll', 3400);
+/** single source of truth for how far you scroll: --reveal-scroll + --story-scroll +
+ *  --fall-scroll + --abyss-scroll in style.css. The reveal budget runs Scenes 1–2 at
+ *  exactly the old pixels (2108 px = the old heroT 0→0.62 of a 3400 px budget); Scene
+ *  3's beat gets a dedicated stretch budget; Scene 4 keeps its own; and the abyss
+ *  travel is APPENDED — adding it cannot move any earlier frame, because every segment
+ *  of the map is defined by pixels. buildScrollMap wires all four. */
+const revealScroll = cssNumber('--reveal-scroll', 2108);
+const storyScroll = cssNumber('--story-scroll', 2400);
+const fallScroll = cssNumber('--fall-scroll', 2200);
+const abyssScroll = cssNumber('--abyss-scroll', 2800);
+const lineScroll = cssNumber('--line-scroll', 2600);
+let wasLineWorld = false;
+const storyMap = buildScrollMap({
+  revealPx: revealScroll,
+  storyPx: storyScroll,
+  fallPx: fallScroll,
+  abyssPx: abyssScroll, // Scene 5's travel
+  linePx: lineScroll, // Scene 6: the white world + red line
+  revealEndT: SCENE3.appear[0], // the reveal ends exactly where Scene 3's star window opens
+});
+const scrollLength = storyMap.totalPx; // the pin is one section: reveal + story + fall
+const heroSplit = (revealScroll + storyScroll) / scrollLength; // legacy label: hero-likes end of the map
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
 if (reducedMotion) {
   PATH.float.amp = 0; // no handheld drift; the scroll-driven move still works
   PATH.damping = 10;
+  FALL.camera.shake.pos *= 0.35; // the fall lurch keeps its punch, the jitter does not
+  FALL.camera.shake.rot *= 0.35;
+  FALL.camera.roll.kick *= 0.4;
 }
 
 /* ───────────────────────────── renderer ──────────────────────────── */
@@ -176,16 +217,11 @@ scene.add(canvasGlow);
 const baseGlow = canvasGlow.intensity;
 
 /* ───────────────────────────── ground ─────────────────────────────── */
-
-const ground = new THREE.Mesh(
-  new THREE.CircleGeometry(60, 72), // huge: its far edge is fully fogged, so no visible disc rim
-  new THREE.MeshStandardMaterial({ color: 0x0a0e16, roughness: 0.96, metalness: 0 })
-);
-ground.rotation.x = -Math.PI / 2;
-// no floor shadows: props are grounded by soft blobs in artist.js, and letting the floor
-// receive the map would print the directional light's rectangular ortho frustum on it
-ground.receiveShadow = false;
-scene.add(ground);
+/* Scene 4 needed a floor that can break, so the disc now lives in scene4.js as two
+   flush half-discs — same radius/segments/material as the old single disc, so Scenes 1–3
+   render identically (the seam is sub-pixel); `openW` pries them apart and hinges them
+   down. No floor shadows either before or after: props are grounded by soft blobs in
+   artist.js, and a shadow-receiving floor would print the key light's ortho frustum on it. */
 
 /* ───────────────────────────── the actor ─────────────────────────── */
 
@@ -207,13 +243,45 @@ const state = { t: 0 }; // GSAP writes this; the render loop reads it. Nothing e
 const rig = createCameraRig(camera);
 rig.update(0, 1 / 60); // place the camera before the first paint (no flash of the wrong shot)
 
+/* Scene 4: the fall. Its layer owns the split floor (see the ground note above), the
+   debris, the void veil — and post-passes camera/artist/star/light changes that are
+   pure functions of its own damped local progress p. No second pin, no second tween. */
+const fall = createFallLayer({
+  scene,
+  camera,
+  renderer,
+  artist,
+  star,
+  split: heroSplit,
+  toP: storyMap.p, // the fall reads p straight off the budget map
+  lights: { key, rim, rim2, bounce, wash, canvasGlow },
+});
+/* Scenes 5–6: the shatter + the coding abyss. The layer reads the SAME damped pin
+   value the fall renders (fall.cur), so the dissolve can never disagree with the
+   fall, and it writes exactly nothing while its a = 0 (see src/scene5.js). */
+const abyss = createAbyssLayer({
+  scene,
+  camera,
+  renderer,
+  artist,
+  map: storyMap,
+  veil: fall.veil,
+  exposureBase: CONFIG.exposure,
+  reduced: reducedMotion,
+  scale: innerWidth < 700 ? ABYSS.mobileScale : 1,
+});
+/* Scene 6: the abyss drains into white and the red route draws itself. Same rule as
+   Scene 5: it reads fall.cur, owns only what its l > 0 can see, and writes NOTHING at
+   l = 0 — Scenes 1–5 stay byte-identical. */
+const redline = createRedLineLayer({ scene, camera, rig, map: storyMap, shaftLayer: abyss });
+
 const tween = gsap.to(state, {
   t: 1,
   ease: 'none',
   scrollTrigger: {
     trigger: '#hero',
     start: 'top top',
-    end: () => `+=${scrollLength}`, // 1:1 with --hero-scroll
+    end: () => `+=${scrollLength}`, // 1:1 with the three CSS budgets summed
     pin: true,
     pinType: 'transform',
     anticipatePin: 1,
@@ -226,7 +294,34 @@ const tween = gsap.to(state, {
 
 const debug = new URLSearchParams(location.search).has('debug');
 let readout;
+let markerStar, markerHand, markerTip; // ?debug-only: depth-proof reticles, absent from the default build
 if (debug) {
+  // Three markers that answer the three questions the preview raised:
+  //   star  → is the light in frame and on top? (ring + cross at star.group.position)
+  //   hand  → does it actually travel at the star? (dots on the brush hand + tip)
+  // All are Mesh/Sprite with depthTest:false, fog:false, toneMapped:false and a loud
+  // flat colour, so if one of THEM is ever not visible, the geometry or frustum is the
+  // culprit — not the star's own material. Removed automatically when ?debug is absent.
+  const reticle = (color, size) => {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(size, size * 1.35, 28),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95, depthTest: false, fog: false, toneMapped: false, side: THREE.DoubleSide })
+    );
+    const dot = new THREE.Mesh(
+      new THREE.CircleGeometry(size * 0.34, 16),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1, depthTest: false, fog: false, toneMapped: false, side: THREE.DoubleSide })
+    );
+    g.add(ring, dot);
+    g.renderOrder = 12;
+    g.frustumCulled = false;
+    return g;
+  };
+  markerStar = reticle(0xff2fd6, 0.045);
+  markerHand = reticle(0x35e0ff, 0.02);
+  markerTip = reticle(0x7dff6a, 0.015);
+  scene.add(markerStar, markerHand, markerTip);
+
   const pts = rig.cameraCurve.getPoints(160);
   const line = new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(pts),
@@ -245,7 +340,7 @@ if (debug) {
   });
   document.body.appendChild(readout);
 }
-window.__hero = { state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, star, artist, measureScene3, tween, ScrollTrigger };
+window.__hero = { state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, FALL, ABYSS, RED, heroSplit, storyMap, star, artist, fall, abyss, redline, measureScene3, tween, ScrollTrigger };
 
 /* ───────────────────────────── render loop ───────────────────────── */
 
@@ -256,7 +351,10 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min((now - last) / 1000, 1 / 20); // clamp: a backgrounded tab must not teleport the rig
   last = now;
   elapsed += dt;
-  const { pos, fov } = rig.update(state.t, dt);
+  // Scenes 1–2 run the reveal budget at their original px; Scene 3's beat plays across
+  // the story budget; past it the rig latches at t = 1 (end-frame framing) while Scene 4
+  // descends *on top of it* — see scene4.js buildScrollMap.
+  const { pos, fov } = rig.update(storyMap.heroT(state.t), dt);
 
   // Scene 3 reads the *rendered* progress, so his reaction can never disagree with the shot.
   const s3 = measureScene3(rig.t);
@@ -266,6 +364,31 @@ renderer.setAnimationLoop(() => {
   // the board dims only slightly as he turns away from it — enough to shift the picture's
   // weight onto the star, not enough to lose the canvas in the end frame
   canvasGlow.intensity = THREE.MathUtils.lerp(baseGlow, baseGlow * 0.78, s3.notice);
+  // Scene 4 post-pass: floor, flare, fall pose, camera descent, fog/lights/veil — all
+  // pure functions of its own damped local p; exactly zero writes before it starts.
+  const s4 = fall.update(state.t, elapsed, dt, s3, rig);
+  // Scene 5 post-pass: shatter off the fall's own damped progress; the abyss travel
+  // extends the descent, opens the veil/fog, blends the aim down the shaft.
+  const s5 = abyss.update(fall.cur, elapsed);
+  const s6 = redline.update(fall.cur);
+  // the white stage owns a clean frame: the film vignette lifts with the shell
+  const lineWorld = s6.w.shell > 0.55;
+  if (lineWorld !== wasLineWorld) {
+    hero.classList.toggle('line-world', (wasLineWorld = lineWorld));
+  }
+  if (debug) {
+    // billboard the reticles at the camera each frame; they follow the live objects
+    const tmpV = new THREE.Vector3();
+    markerStar.position.copy(star.group.position);
+    markerStar.quaternion.copy(camera.quaternion);
+    markerStar.visible = s3.appear > 0.02;
+    artist.parts.rightArm.hand.getWorldPosition(tmpV);
+    markerHand.position.copy(tmpV);
+    markerHand.quaternion.copy(camera.quaternion);
+    artist.parts.rightArm.tool.children[2].getWorldPosition(tmpV);
+    markerTip.position.copy(tmpV);
+    markerTip.quaternion.copy(camera.quaternion);
+  }
   renderer.render(scene, camera);
   if (readout) {
     // read-only on `pos`: mutating it would move the camera
@@ -273,9 +396,13 @@ renderer.setAnimationLoop(() => {
     readout.textContent =
       `t ${state.t.toFixed(3)}  rendered ${rig.t.toFixed(3)}\n` +
       `azim ${azim.toFixed(1)}°  dist ${Math.hypot(pos.x, pos.z).toFixed(2)}m  y ${pos.y.toFixed(2)}m  fov ${fov.toFixed(1)}°\n` +
-      `scroll ${Math.round(window.scrollY)} / ${Math.round(scrollLength)}px\n` +
+      `scroll ${Math.round(window.scrollY)} / ${Math.round(scrollLength)}px  heroT ${storyMap.heroT(state.t).toFixed(3)}\n` +
       `star ${s3.appear.toFixed(2)}  notice ${s3.notice.toFixed(2)}  reach ${s3.reach.toFixed(2)}  ` +
-      `step ${artist.stats().step.toFixed(3)}m  stroke ${artist.stats().strokeGate.toFixed(3)}`;
+      `step ${artist.stats().step.toFixed(3)}m  stroke ${artist.stats().strokeGate.toFixed(3)}\n` +
+      `fall p ${s4.p.toFixed(3)}  camY ${camera.position.y.toFixed(2)}m  drop ${s4.camDepth.toFixed(1)}m  ` +
+      `open ${s4.openW.toFixed(2)}  flare ${s4.flare.toFixed(2)}  p ${s4.p.toFixed(3)}\n` +
+      `shatter ${s5.s.toFixed(2)}  abyss a ${s5.a.toFixed(3)}  org ${s5.w.org.toFixed(2)}  dens ${s5.w.dens.toFixed(2)}\n` +
+      `line l ${s6.l.toFixed(3)}  drawn u ${s6.u.toFixed(3)}  door ${s6.w.door.toFixed(2)}  white ${s6.w.shell.toFixed(2)}  camY ${camera.position.y.toFixed(1)}m`;
   }
 });
 

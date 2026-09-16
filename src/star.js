@@ -13,22 +13,26 @@ import * as THREE from 'three';
 
 export const STAR = {
   /**
-   * Solved against the *existing* end frame: at t=1 the camera sits at (-3.55, 1.42, 0.19)
-   * looking at (0, 1.12, 0.44), and this point lands at ndc ≈ (0.58, 0.48) — upper right,
-   * clear of his head (-0.24, 0.42) and of the canvas (0.24, 0.05) — while being only 17°
-   * off his facing axis, so "he looks up and it is simply there" reads without him turning far.
+   * Solved against the end frame for BOTH a desktop (16/9) and a phone (≈9/16) viewport.
+   * It hangs high over the board's right corner, ~1 m ahead of his face: in frame at
+   * both aspects, deeper than the canvas plane (the "beyond the board" read), clear of
+   * the head and canvas silhouettes, and close enough that the Scene-4 catch nearly
+   * touches it. It CANNOT sit further out — the final camera is a pure profile and a
+   * portrait viewport sees only ±8.8° horizontally, so anything past z≈1.2 lands off
+   * the right edge on phones (that is what made the old anchor invisible there).
+   * npm run check asserts all of it at 1600×900 AND 390×844.
    */
-  position: new THREE.Vector3(0.55, 1.74, 2.15),
-  size: 0.046, // the shard, not the halo: bigger and it reads as a held gem instead of a light // radius of the crystal — keep it small; scale implies distance
+  position: new THREE.Vector3(0.55, 1.9, 0.72),
+  size: 0.052, // the shard, not the halo: bigger and it reads as a held gem instead of a light // radius of the crystal — keep it small; scale implies distance
   core: 0xfff4e2, // pale gold-white
   glow: 0xffd7a0,
-  light: { color: 0xffe0b2, intensity: 6, distance: 6.5, decay: 2 },
+  light: { color: 0xffe0b2, intensity: 6.5, distance: 8.5, decay: 2 }, // it now sits ~0.3 m off the board: softer or it blows the paint out
   pulseHz: 0.23, // one breath every ~4.3 s
   flicker: 0.055, // ±5.5% shimmer on top of the pulse
-  haloScale: 8.5, // tight, warm falloff — a wide cold halo reads as a UI glow / game pickup
-  flareScale: 15,
-  flareOpacity: 0.13,
-  coreEmissive: 0.3, // keep it under the clip point: facets you can *see* read as an object,
+  haloScale: 11, // tight, warm falloff — a wide cold halo reads as a UI glow / game pickup
+  flareScale: 18,
+  flareOpacity: 0.24,
+  coreEmissive: 0.55, // bright but under the clip point: facets you can *see* read as an object,
   // a clipped white disc reads as a smudge (or a UI badge). The nucleus sprite is the light.
   arriveFrom: new THREE.Vector3(0, -0.26, 0.5), // it drifts up/out of the dark into place
   spin: 0.045, // rad/s
@@ -90,11 +94,12 @@ export function createStar(conf = STAR) {
   group.add(core);
   // the light itself: one tight additive nucleus in front of the shard, so what you read is
   // a point of origin with a dark solid object behind it, not a glowing ball
+  const glowOpts = { map, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, depthTest: false, fog: false, toneMapped: false };
   const nucleus = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map, color: 0xfff4e0, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 })
+    new THREE.SpriteMaterial({ ...glowOpts, color: 0xfff4e0, opacity: 0 })
   );
-  nucleus.scale.setScalar(conf.size * 2.6);
-  nucleus.renderOrder = 2;
+  nucleus.scale.setScalar(conf.size * 3.1);
+  nucleus.renderOrder = 7; // glow layers sort above every room object (see the depthTest note)
   group.add(nucleus);
 
   /* the light it throws -------------------------------------------- */
@@ -103,18 +108,19 @@ export function createStar(conf = STAR) {
 
   /* glow layers (cheap stand-in for bloom; see the note in main.js) -- */
   const halo = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map, color: conf.glow, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 })
+    new THREE.SpriteMaterial({ ...glowOpts, color: conf.glow, opacity: 0 })
   );
   halo.scale.setScalar(conf.size * conf.haloScale);
   const flare = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map, color: conf.core, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 })
+    new THREE.SpriteMaterial({ ...glowOpts, color: conf.core, opacity: 0 })
   );
   flare.scale.set(conf.size * conf.flareScale, conf.size * 2.6, 1); // one short soft streak, not a cross
   // One faint cold scatter only — wide and blue was the "collectible" tell.
   const scatter = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map, color: 0x9ab4d8, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false, opacity: 0 })
+    new THREE.SpriteMaterial({ ...glowOpts, color: 0x9ab4d8, opacity: 0 })
   );
   scatter.scale.setScalar(conf.size * 20);
+  halo.renderOrder = 6; flare.renderOrder = 6; scatter.renderOrder = 5;
   group.add(scatter, halo, flare);
 
   /* dust in the light ------------------------------------------------ */
@@ -135,16 +141,20 @@ export function createStar(conf = STAR) {
       new THREE.PointsMaterial({
         map,
         color: 0xffe8c4,
-        size: 0.018,
+        size: 0.024,
         sizeAttenuation: true,
         transparent: true,
         depthWrite: false,
+        depthTest: false,
         blending: THREE.AdditiveBlending,
+        fog: false,
+        toneMapped: false,
         opacity: 0,
       })
     )
   );
   group.add(motes);
+  motes.children[0].renderOrder = 6;
 
   group.visible = false;
 
@@ -152,6 +162,10 @@ export function createStar(conf = STAR) {
     group,
     core,
     light,
+    // Scene 4 handles: the glow sprites + dust as a group of named layers so the
+    // fall overlay can flare and fade them without owning any state of its own.
+    layers: { nucleus, halo, flare, scatter },
+    motes,
     anchor: conf.position.clone(),
     /**
      * @param {{appear:number, notice:number, reach:number}} s3 Scene-3 progress, 0→1
@@ -170,15 +184,15 @@ export function createStar(conf = STAR) {
       core.rotation.x = Math.sin(time * 0.21) * 0.18;
       core.material.emissiveIntensity = conf.coreEmissive * breath * (0.8 + 0.2 * e);
       nucleus.scale.setScalar(conf.size * (2.3 + 0.5 * breath));
-      nucleus.material.opacity = 0.85 * e;
-      halo.material.opacity = 0.5 * e;
+      nucleus.material.opacity = 1.0 * e;
+      halo.material.opacity = 0.8 * e;
       flare.material.opacity = conf.flareOpacity * e;
-      scatter.material.opacity = 0.1 * e;
+      scatter.material.opacity = 0.16 * e;
       halo.scale.setScalar(conf.size * conf.haloScale * (0.92 + 0.08 * breath));
       flare.scale.set(conf.size * conf.flareScale * (0.9 + 0.1 * breath), conf.size * 2.6, 1);
       light.intensity = conf.light.intensity * e * breath * (1 + 0.16 * (s3.notice ?? 0));
       motes.rotation.y = time * 0.06;
-      motes.children[0].material.opacity = 0.3 * e;
+      motes.children[0].material.opacity = 0.5 * e;
     },
   };
 }

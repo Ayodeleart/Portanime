@@ -1,27 +1,32 @@
 /**
  * scene3.js — Scene 3's *timing*, and nothing else.
  *
- * The camera spline, the pin and the scroll length stay exactly as they were. Scene 3 is
- * driven off the same 0→1 progress the camera already uses, in the last third of the move:
+ * The camera spline and the pin's reveal stay exactly as they were. Scene 3 is
+ * driven off the same 0→1 progress the camera already uses — but since the
+ * Scene-4 recovery the beat owns its OWN scroll budget (--story-scroll), so the
+ * windows below are measured against a timeline that stretches the tail of the
+ * move: the side view settles, the star is allowed to SIT there visibly, then he
+ * notices, then he commits — before anything falls.
  *
- *   t 0.55 → 0.74   the star arrives (fade + a slow slide into place)
- *   t 0.68 → 0.88   he stops painting and turns toward it
- *   t 0.80 → 1.00   he leans, takes a half step, and reaches
+ *   t 0.62 → 0.82   the star arrives (fade + a slow slide into place) — after the
+ *                          composition has settled, and it lingers ~20 % of the beat
+ *                          before anything else asks for attention
+ *   t 0.72 → 0.92   the brush audibly stops; head + chest + pelvis turn toward it
+ *   t 0.84 → 1.00   he leans, takes a clear step, and reaches
  *
- * So the camera settles into the side profile at exactly the moment he notices — one move,
- * one beat. Because every value is a pure function of `t`, scrolling up unwinds the whole
+ * Because every value is a pure function of `t`, scrolling up unwinds the whole
  * sequence frame-for-frame with no extra state.
  */
 
 export const SCENE3 = {
   /** [start, end] of each beat, in hero-scroll progress. Move them apart for more air. */
-  appear: [0.55, 0.74],
-  notice: [0.68, 0.88],
-  reach: [0.8, 1.0],
+  appear: [0.62, 0.82],
+  notice: [0.72, 0.92],
+  reach: [0.84, 1.0],
   /** how far he commits: metres of step, radians of lean at full `reach` */
-  step: 0.115,
-  lean: 0.055,
-  bob: 0.018, // how much the free foot lifts mid-step
+  step: 0.21,
+  lean: 0.09,
+  bob: 0.03, // how much the free foot lifts mid-step
 };
 
 export const smoothstep = (x, a, b) => {

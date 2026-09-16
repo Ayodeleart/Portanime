@@ -52,16 +52,37 @@ async function goTo(frac, name) {
 }
 
 await page.waitForTimeout(1500);
-for (const [frac, name] of [
+// Stops are pinned to SCROLL PIXELS (the story lives in px, not fractions) and derive
+// from the live three-budget map: reveal 0→2108, story 2108→4508 (star/notice/reach),
+// fall 4508→6708. Add ?debug to the URL to get the star/hand/tip reticles in-frame.
+const px = await page.evaluate(() => {
+  const m = window.__hero.storyMap;
+  return { reveal: m.revealPx, story: m.storyPx, fall: m.fallPx, abyss: m.abyssPx, total: m.totalPx };
+});
+const stopDefs = [
   [0, '0-load'],
-  [0.25, '1-quarter'],
-  [0.5, '2-mid'],
-  [0.66, '3-star-in'],
-  [0.85, '4-notices'],
-  [1, '5-end'],
-  [0, '6-back-at-0'],
-])
-  await goTo(frac, name);
+  [() => Math.round(px.reveal * 0.55), '1-orbit'],
+  [() => px.reveal - 2, '2-reveal-end'], // side view settles; no star yet
+  [() => px.reveal + Math.round(px.story * 0.35), '3-star-in'], // star fully present, before he turns
+  [() => px.reveal + Math.round(px.story * 0.66), '4-notice'], // head swung, stroke paused
+  [() => px.reveal + px.story - 2, '5-reach'], // full reach at story end: brush at the star
+  [() => px.reveal + px.story + Math.round(px.fall * 0.035), '6-catch'], // catch closes on it (p=.035)
+  [() => px.reveal + px.story + Math.round(px.fall * 0.075), '7-flare-collapse'], // flare peak + ground cracks
+  [() => px.reveal + px.story + Math.round(px.fall * 0.16), '8-fall'], // gone; camera diving after him
+  [() => px.reveal + px.story + Math.round(px.fall * 0.62), '9-shatter'], // the body is breaking into code
+  [() => px.reveal + px.story + px.fall + Math.round(px.abyss * 0.06), '10-abyss-open'], // veil lifts: chaotic shaft
+  [() => px.reveal + px.story + px.fall + Math.round(px.abyss * 0.42), '11-abyss-mid'], // density climbing
+  [() => px.reveal + px.story + px.fall + Math.round(px.abyss * 0.85), '12-abyss-order'], // lattice order, room below
+  [() => px.total - 1, '13-bottom'],
+  [() => 0, '10-back-at-0'],
+];
+for (const [fn, name] of stopDefs) await goTo(fn() / px.total, name);
+
+// same beat on a phone viewport, where the invisibility was reported
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(800);
+for (const [fn, name] of stopDefs.filter(([, n]) => /^([2-8]|10)/.test(n)))
+  await goTo(fn() / px.total, `phone-${name}`);
 
 console.log('\nconsole:\n' + (logs.slice(0, 20).join('\n') || '  (clean)'));
 await browser.close();

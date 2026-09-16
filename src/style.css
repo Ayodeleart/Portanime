@@ -1,14 +1,31 @@
 /* ------------------------------------------------------------------
-   Cinematic hero — Scenes 1–2
+   Cinematic hero — Scenes 1–4 (the fall)
    The look is mostly carried by this gradient + the rim light in WebGL.
-   Scroll length for the whole camera move lives in --hero-scroll and is
-   read by main.js, so it can be changed in exactly one place.
+   The pin is ONE section scrolled through three budgets: --reveal-scroll runs
+   Scenes 1–2's camera move (it equals the old 3400 px hero budget up to the
+   side view settling — same pixels, same timing), --story-scroll gives Scene 3's
+   star/notice/reach beat its own room, --fall-scroll is Scene 4, --abyss-scroll is
+   the Scene 5 travel through the coding abyss, and --line-scroll is Scene 6's white
+   world with the drawn red line. main.js reads all five and derives
+   `split`, so they can each be tuned in exactly one place.
    ------------------------------------------------------------------ */
 
 :root {
-  /* how far you scroll to complete Scene 1 -> Scene 2 (px).
+  /* how far you scroll to complete Scene 1 → Scene 3 (px).
      Bigger = slower, more languid camera move. */
-  --hero-scroll: 3400px;
+  /* Scenes 1–2: the old heroT 0→0.62 of a 3400px budget — pixel-identical reveal */
+  --reveal-scroll: 2108px;
+  /* Scene 3's beat: the star sits, he turns, he reaches — on its own time */
+  --story-scroll: 2400px;
+  /* Scene 4's budget: the fall from the star's edge into the void (px).
+     Split math keeps Scenes 1–3 on their original pixels no matter what. */
+  /* Scene 4's budget: the fall from the star's edge into the void (px) */
+  --fall-scroll: 2200px;
+  /* Scenes 5–6: the travel through the coding abyss (px). Appended after the fall —
+     it cannot move any earlier frame. ~2–3 viewport lengths of pure descent. */
+  --abyss-scroll: 2800px;
+  /* Scene 6: the white world + the drawn red line + the doorway (px) */
+  --line-scroll: 2600px;
   --bg-deep: #04050a;
   --bg-mid: #0e131d;
   --bg-glow: #23304a;
@@ -66,20 +83,31 @@ body {
   inset: 0;
   pointer-events: none;
   background: radial-gradient(120% 100% at 50% 48%, transparent 44%, rgba(0, 0, 0, 0.55) 100%);
+  transition: opacity 0.35s ease;
+}
+/* Scene 6 owns a clean WHITE stage: the film vignette would grey its edges, so main.js
+   toggles this class once the white shell is over half up (display only, never state). */
+#hero.line-world::after {
+  opacity: 0;
 }
 
 /* Scroll length --------------------------------------------------- */
-/* On a phone, 3400px of scroll is a long haul for one move — and because main.js reads
-   this variable, a media query is all it takes: the pin length follows automatically. */
+/* On a phone, 3400 + 2200 px of scroll is a long haul for one move — and because
+   main.js reads both variables, a media query is all it takes: the pin length and the
+   hero/fall split follow automatically (beats live in t, so they survive the change). */
 @media (max-width: 640px) {
   :root {
-    --hero-scroll: 2100px;
+    --reveal-scroll: 1300px;
+    --story-scroll: 1700px;
+    --fall-scroll: 1500px;
+    --abyss-scroll: 1900px;
+    --line-scroll: 1700px;
   }
 }
 
 #scroll-space {
   /* MUST stay transparent: the fixed/absolute canvas reads through it.
-     Give your own sections an opaque background when you add Scene 3+. */
-  height: var(--hero-scroll);
+     Give your own sections an opaque background when you add the abyss / projects. */
+  height: calc(var(--reveal-scroll) + var(--story-scroll) + var(--fall-scroll) + var(--abyss-scroll) + var(--line-scroll));
   background: transparent;
 }

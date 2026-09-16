@@ -1,11 +1,19 @@
-# Scroll-driven cinematic hero — Scenes 1, 2 & 3
+# Scroll-driven cinematic hero — Scenes 1 → 6
 
 One pinned section, one scroll, one camera move: an **extreme close-up on the back of a
 painter's head** → **orbiting and pulling out to a side-profile two-shot at his easel** →
 late in that same move **a small light appears beyond the canvas**, he stops painting, turns
-toward it and shifts a half step closer. Scroll up and all of it unwinds, frame-for-frame.
+toward it and shifts a half step closer — and as he reaches, **the ground breaks open and he
+falls**. On the way down **his silhouette shatters into code**, the scroll carries on
+**through a deep procedural programming abyss** that starts chaotic and organises itself —
+then **the code drains into a red line that draws itself across a clean white world**,
+camera tracking its leading edge, until it reaches **an open red doorway** waiting at the
+end. Scroll up and all of it unwinds, frame-for-frame: the line un-draws, the white world
+drains back into code, the fall rewinds.
 
-No fall, no abyss, no code tunnel, no project sections. Not in scope, on purpose.
+Scenes 1–6 are in. Deliberately out of scope, on purpose: everything BEYOND the doorway —
+the project content itself. The `project-entry` plane inside the door is the seam where
+Scene 7 attaches.
 
 ## Run
 
@@ -16,24 +24,30 @@ npm run check      # headless framing + timing assertions (no browser needed)
 npm run build      # → ./dist
 ```
 
-`?debug` on the URL draws the camera + lookAt trajectories in the scene and prints
-`t / azimuth / distance / fov / scrollY` plus the Scene-3 beats
-(`star`, `notice`, `reach`, `step`, `stroke`). `window.__hero` exposes
-`{ state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, star, artist, measureScene3, tween, ScrollTrigger }`.
+`?debug` on the URL draws the camera + lookAt trajectories, prints the same readout lines
+(`t / rendered t / scroll px`, the Scene-3 beats, the Scene-4 fall line) **and** reticles
+the beat in-scene: a magenta ring on the star (from the first frame of its fade-in), a cyan
+ring on the brush hand, a green one on the brush tip. If the star's glow ever reads as
+"invisible", the ring shows whether it is off-frame or merely dim — it is depth-test-free,
+so it can never be occluded away. With `?debug` absent no marker object is even created.
+`window.__hero` exposes
+`{ state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, FALL, storyMap, heroSplit, star, artist, fall, measureScene3, tween, ScrollTrigger }`.
 
 ## How it works
 
 | file | role |
 | --- | --- |
-| `src/main.js` | renderer, lights, sky/ground, GSAP ScrollTrigger pin + `state.t`, render loop |
+| `src/main.js` | renderer, lights, sky, the GSAP ScrollTrigger pin over hero+fall budgets + `state.t`, render loop |
 | `src/camera-path.js` | the move: camera spline, lookAt spline, lens (FOV) keys, roll, damping |
 | `src/artist.js` | the figure, the easel, studio props, idle + reaction animation |
 | `src/loft.js` | geometry helpers: loft through elliptical rings, limbs from joint pivots |
 | `src/star.js` | Scene 3's light: crystal core, nucleus, halo, flare, point light, dust |
 | `src/scene3.js` | Scene 3's *timing map* — when the star, the notice and the reach happen |
-| `src/style.css` | fullscreen canvas, 100vh pinned `#hero`, `--hero-scroll` length |
+| `src/scene5.js` | Scenes 5–6: the figure shatter (instanced shards/glyphs/lines/motes) + the coding abyss shaft — chaos → lattice, all pure functions of `a` |
+| `src/scene4.js` | Scene 4 (the fall): split math, the two-floor slab, flare/fade, the camera plunge, the void — every value a pure function of local `p` |
+| `src/style.css` | fullscreen canvas, 100vh pinned `#hero`, the three scroll budgets (`--reveal-scroll`, `--story-scroll`, `--fall-scroll`) |
 
-Three ideas carry the whole feel:
+Four ideas carry the whole feel:
 
 1. **Scroll never touches the camera.** ScrollTrigger scrubs a proxy
    (`gsap.to(state, { t: 1, scrub: 1.15 })`) and the render loop *damps toward it*
@@ -42,23 +56,87 @@ Three ideas carry the whole feel:
    radius grows 0.85 m → 3.55 m; `targetCurve` slides the aim from just past his shoulder to
    between artist and canvas. The orbit never passes in front of him, so the face is never
    readable: Scene 1 is a back-of-head close-up, Scene 2 a profile.
-3. **Scene 3 borrows the tail of the same `t`.** The camera spline, the pin length and the
-   scrub are untouched; the star's arrival, the notice and the reach are `smoothstep` windows
-   over the last 45 % of the move, and the figure is a pure function of them. That is why
-   scrolling up is exact rather than "close enough": there is no separate animation state to
-   reverse, and no second timeline to keep in sync.
+3. **The pin is one scroll split into five named budgets.** `--reveal-scroll` (2108px)
+   runs Scenes 1–2, `--story-scroll` (2400px) runs Scene 3's beat, `--fall-scroll` (2200px)
+   runs Scene 4, `--abyss-scroll` (2800px) runs Scene 5's travel and `--line-scroll`
+   (2600px) runs Scene 6 — still *one* ScrollTrigger, one pin, one `t`. `buildScrollMap()`
+   in `scene4.js` turns the pin into four inputs: `heroT` (Scenes 1–3), `p` (Scene 4),
+   `a` (Scene 5) and `l` (Scene 6). Segments are defined
+   by PIXELS, so appending a budget can never move an earlier frame — check-shot proves it
+   (`Scenes 1–4 keep every pixel: heroT/p identical with or without the abyss budget`).
+   Below 2108px the map has exactly the OLD 1/3400 px slope — every pre-Scene-3 frame keeps
+   the pixels it always had (`npm run check` asserts that to 1e-12) — and Scene 4's
+   post-pass still writes nothing at all until `p > 0`.
+4. **Scene 3 owns its beat outright.** Its `smoothstep` windows run over the story budget
+   (`heroT` 0.62 → 1), which the map stretches to 2400px of scroll — the star can *sit*
+   visibly for ~1300px before he turns, and the reach reads on a phone instead of living in
+   the last 15 % of the pin. The camera spline is untouched; the figure is a pure function of
+   `t`. That is why scrolling up is exact rather than "close enough": there is no separate
+   animation state to reverse, and no second timeline to keep in sync.
 
-### Scene 3 beats (fraction of the pinned scroll, `t`)
+### Scene 3 beats (`heroT` = the map's Scenes-1–3 input; px are desktop, pin now totals 12108px)
 
-| window | what happens |
-| --- | --- |
-| `0 → 0.55` | nothing new — the close-up and the orbit are exactly as before |
-| `appear 0.55 → 0.74` | the star fades in and slides a short distance into place, `near` nothing in frame yet |
-| `notice 0.68 → 0.88` | brush strokes gate to a stop, head/chest/pelvis turn toward the light, canvas light dims slightly |
-| `reach 0.80 → 1.00` | he leans, takes a 0.115 m step toward it, lifts the free foot, the brush hand drifts up off the canvas |
+| window | heroT | px | what happens |
+| --- | --- | --- | --- |
+| reveal | `0 → 0.62` | 0 → 2108 | nothing new — Scenes 1–2, *pixel-identical to before* |
+| appear | `0.62 → 0.82` | 2108 → 3371 | the star fades in over the board's corner and **sits there** — fully lit for ~1100 px of scroll before anything else asks for attention |
+| notice | `0.72 → 0.92` | 2740 → 4000 | strokes stop; head + torso turn ~40° onto the light, chin up; canvas light dims slightly |
+| reach | `0.84 → 1.00` | 3498 → 4508 | a clear 0.21 m step, a forward lean, the brush arm lifts off the canvas toward it |
 
-All three finish at `t = 1`, i.e. the camera settles into the side profile at the moment he
-notices — one move, one beat.
+On phones (8100px pin): reveal 0→1300, appear 1300→2420, notice 1573→2680, reach 2711→3000.
+At story end the figure holds its max-reach pose — the camera is the same settled side
+profile as always; Scene 3 is the same move, just given the scroll time it needs.
+
+### Scene 4 beats (local `p` over the 2200px fall budget — desktop px 4508 → 6708)
+
+| window | px (≈) | what happens |
+| --- | --- | --- |
+| `p = 0` | 4508 | ownership flips: Scenes 1–3 latch at their end state; the layer writes nothing until here |
+| `catch 0 → 0.09` | 4508 → 4706 | the catch pose commits by `p = 0.03` (4574px): the brush TIP closes to ~8 cm from the star — solved, not waved at (`FALL_POSE.catchArm`) |
+| `flare 0.03 → 0.095` | 4574 → 4717 | the star swells once, softly (sin envelope — a light, not an explosion): the visible CAUSE of what follows |
+| `collapse 0.07 → 0.17` | 4662 → 4882 | the floor wrenches open to a 5.9 m rift, hinged halves sinking ≈8.4 m; the easel and the contact shadows ride the centre down |
+| `fall 0.10 → 1` | 4728 → 6708 | the camera lurches (≈44 % of its drop by p 0.24) then accelerates to y ≈ −16.9 m; FOV 37° → 45.5°; shake/roll only around the drop; he falls *deeper* than the camera and drifts up in frame |
+| `star fade 0.095 → 0.42` | 4717 → 5432 | the light dims with distance while still in frame, then is gone behind the dive |
+| `void …` | — | fog → black, studio lights → 18 %, −45 % exposure, black veil shell closes: the placeholder deep dark |
+
+The windows are front-loaded on purpose: the dive carries the star out of frame within a
+few hundred pixels, so the flare and the loss of the light play *while it is still
+visible* — that is the beat the fall answers.
+
+### Scene 5: the shatter + the coding abyss (local `a` over the 2800px abyss budget)
+
+| when | px / p | what happens |
+| --- | --- | --- |
+| `p 0.45 → 0.82` (during the fall, before `a` exists) | 6498 → 6708 | **the shatter**: the figure dissolves into instanced dark shards, glowing glyph sprites, thin data lines and motes — all parented to the artist, so they ride the fall. The body's own meshes blink out per-mesh behind the dissolve (head/hair last); the glow systems render ABOVE Scene 4's closing veil (renderOrder 6 vs 3) so the code light visibly escapes the dark while the matter sinks into it |
+| `a 0 → 0.06` | 6708 → 6876 | the veil opens, fog re-arms to corridor depth, exposure recovers; the camera keeps falling `a × 120 m` past Scene 4's floor |
+| `a 0.05 → 0.5` | → 8108 | `dens`: the stream/panel/mote budgets ramp 35 % → 100 % — sparse and violent becomes crowded |
+| `a 0.45 → 0.95` | 7968 → 9388 | `org`: chaos lerps into the lattice — glyph columns snap to 24 radial columns, data lines straighten into long vertical paths, panels turn to face the shaft axis in aligned rows, grid/wire fragments flatten and square up |
+| `a 0.62 → 1` | 8444 → 9508 | `chaosFade`: the noisy layers (lines, grids, wires, motes) thin by up to 50 % and flicker halves — the shaft ends CLEAN: glowing organised columns with dark vertical room between them |
+| reverse | any | everything is a closed-form function of scroll — nothing accumulates, `a → 0` restores Scene 4's latched frame byte-for-byte (guarded) |
+
+All content is **generated generic fragments** (`ABYSS.glyphsA/B`, `ABYSS.snippets`) — no
+copyrighted code dumps, no real client code. The systems are 4 instanced glyph/shard meshes,
+1 instanced panel family ×6 textures, 1 far-layer instanced mesh, 2 batched `LineSegments`
+buffers (data lines, grid + wire tiles) and 2 `Points` clouds — **~16 draw calls for the
+whole shaft**, every instance matrix wrapped ±44 m around the camera so one fixed budget
+reads as an infinite corridor. Heavy rewrites run only when `a` actually moves, so a scroll
+stop is a single frozen frame; the time term is opacity flicker only.
+
+
+### Scene 6: the red line (local `l` over the 2600px line budget)
+
+| window | l | px (≈) | what happens |
+| --- | --- | --- | --- |
+| drain + white | `0.02 → 0.36` | 9508 → 10445 | the organised code **drains**: 260 motes converge on the route's waking point and are spent into it; a depth-test-free white shell (renderOrder 5) closes over the shaft — the abyss isn't faded, it is *swallowed*; fog re-arms to clean white depth; the CSS film-vignette lifts (`#hero.line-world`) |
+| the line draws | `0.16 → 0.94` | 10059 → 11959 | an animated **draw range** over a variable-radius tube: it begins as a short thin curved mark diving with the fall, straightens into bold geometric diagonals, radius grows 0.045 → 0.17 m along the route (thin → bold is baked in the GEOMETRY, not a shader); a soft-edge twin tube + lead disc ride the drawn end |
+| camera tracks | `0.05 → 1` | 10038 → 12108 | the camera blends off Scene 5's held aim onto a companion of the SAME curve — beside/above the leading edge by `cam.side/up`, `cam.back` metres behind the drawn point — and squares up onto **the door's own facing** for arrival (`fin` blend past u 0.9); position and aim are blends FROM the live frame each step, so they are pure in `l` and never accumulate |
+| the doorway | `0.55 → 0.85` | 11095 → 11884 | a real extruded red frame (4.2 × 6.0 m opening, 0.55 m jambs, 1.5 m deep) assembles at the route's end — thick, architectural, built BY the line arriving at it; inside sits only `project-entry`, a soft warm light plane — no text, no UI, no content |
+| arrival | `1` | 12108 | camera settles 10.2 m from the door centre, square to its face — guarded inside-frame at 16:9 and overfilling-but-centred at 390×844 (a 7 m tall door at 10 m cannot FIT a 21.7° portrait hFOV — it is meant to overfill) |
+
+Everything in Scene 6 is scroll-pure: **scrolling up un-draws the line and rewinds the
+camera exactly** (guarded byte-for-byte against a Scene-6-less pipeline at l = 0.3, at
+the abyss bottom and at 0). The whole white world costs ≤ 10 meshes: core tube, glow tube,
+lead disc, shell, drain points, 4 frame boxes + entry plane.
 
 ## Tuning
 
@@ -67,24 +145,71 @@ notices — one move, one beat.
   `PATH.mode: 'arc'` switches to `curve.getPointAt(t)` (constant world speed); the default
   `'keyframe'` gives each key equal scroll so the close-up lingers. `npm run check` asserts
   these keys verbatim — if you change them on purpose, change them there too.
-- **Scroll length / speed** → `--hero-scroll` in `style.css` (3400px, 2100px on small screens).
-  `main.js` reads it, so it is edited in exactly one place. `CONFIG.scrub` and `PATH.damping`
-  add inertia on top.
+- **Scroll length / speed** → `--reveal-scroll` (2108px, 1300px small screens),
+  `--story-scroll` (2400px, 1700px), `--fall-scroll` (2200px, 1500px) and
+  `--abyss-scroll` (2800px, 1900px) in `style.css` — 9508px desktop / 6400px mobile pin.
+  `main.js` reads all four and `buildScrollMap` composes them, so each budget is edited in
+  exactly one place. `--reveal-scroll` = `0.62 × the old 3400px hero budget` — keep that
+  ratio or Scenes 1–2's pixels move (check-shot asserts it). `CONFIG.scrub` and `PATH.damping` add inertia
+  on top — the fall damps with the same λ, so reversals stay symmetrical.
 - **Star position / colour / intensity** → `STAR` in `src/star.js`. `position` is floor-space
   world coords; `size` is the crystal (the halo and flare scale off it via `haloScale`,
   `flareScale`, `flareOpacity`); `core` / `glow` / `light.color` set the palette; `light`
   carries `intensity`, `distance`, `decay`; `pulseHz` / `flicker` the breathing; `arriveFrom`
-  the offset it slides in from; `spin`, `motes` the shimmer. **Its position was solved against
-  the end frame** — it has to sit inside the camera's frustum *and* within ~17° of where he is
-  looking; move it and re-run `npm run check`.
+  the offset it slides in from; `spin`, `motes` the shimmer. **Its position is solved against
+  the end frame at BOTH aspects.** The portrait constraint is the binding one: the end camera
+  is a pure profile 3.55 m off the +X axis and a 390-wide phone sees only ±8.8° around that
+  axis, so a star out past z ≈ 1.2 falls off the right edge — which is exactly why the old
+  anchor was "invisible" on phones. The star therefore hovers *over* the board's far corner
+  (~1 m ahead of his face): in frame at both aspects through the whole beat, clear of the
+  head/board silhouettes, deeper than the canvas plane, and a step away from the catch.
+  `npm run check` asserts all of it. Move it and re-run check, re-run
+  `node tools/.fall-probe.mjs --solve` to re-bake `catchArm`, and `node
+  tools/.visual-proof.mjs` for the software pixel proofs.
+- **How the fall plays** → `FALL` and `FALL_POSE` in `src/scene4.js`: beat windows are
+  `[start, end]` ranges of p; `FALL.shape` + `camera.drop` shape the plunge (lurch share vs
+  acceleration), `ground.*` the rift width/sink/hinge, `void_.*` the darkness (fog/lights/
+  exposure/veil), `artist.*` how much deeper he falls, and `FALL_POSE.catchArm`/`.body` the
+  catch and fall pose (`catchArm` is not hand-tuned: `node tools/.fall-probe.mjs --solve`
+  hill-climbs it against the live rig until the brush tip meets the star, then re-bakes the
+  constants). `npm run check` asserts the scroll map — including the px-identical promise for
+  Scenes 1–2 and the phone-viewport framing — the 5.9 m rift, `y ≈ −16.9`, the
+  dormant-at-p=0 property and byte-exact reversal; retune on purpose and update it there too.
+  `node tools/.fall-probe.mjs` prints the whole curve table for tuning, and
+  `node tools/.visual-proof.mjs` raster-composites the beat headlessly (star/head/hand/tip
+  px metrics + PNGs in ./.proof) — no browser needed.
+- **The shatter + the abyss** → `ABYSS` in `src/scene5.js` (one config block, everything
+  named): `travel`/`band` set the shaft scale; `shatter.win` decides when the body breaks up
+  (keep it inside Scene 4's window so the veil darkening reads as *absorption*, not exit);
+  `counts` + `mobileScale` are the perf budget; `weights.{veil,fog,densUp,org,chaosFade}`
+  are the five envelopes that shape the fall-through; `colors`/`alpha` the palette;
+  `lattice` the ordered destination. Dissolve amount/speed for a gentler or harsher shatter
+  = `shatter.win` + `shatter.drift` + `shatter.glowMix`. `node tools/.visual-proof.mjs` now
+  includes stops `10-shatter` → `14-bottom` for eyeballing it headlessly.
+- **The red line + doorway** → `RED` in `src/scene6.js`: `line.points` (LOCAL to the
+  abyss-bottom anchor — it self-follows any re-tune of the earlier budgets via
+  `abyssAnchor()`), `revealWin` timing, `rStart/rEnd/radiusEase` for thin→bold, `color`,
+  `glowOpacity`, `leadDot`; `cam.{lead,side,up,back,sideEnd,trackWin}` the tracking rig;
+  `white.{shellWin,fogWin,…}` the transition timing; `door.{w,h,jamb,depth,beyond,
+  revealWin,entryColor,entryGlow}` the doorway; `drain` the convergence. The reveal is a
+  draw range over `variableTube()` — retune freely, then update the frozen `RED_BASELINE`
+  in `tools/check-shot.mjs` (it guards this exact block) and re-run `npm run check` plus
+  `node tools/.visual-proof.mjs` (stops `15-drain`…`20-up-reverse`).
+- **Project entry (next scene's hook)** → the plane `name:'project-entry'` inside the door
+  (`userData.projectEntry`) is the seam: Scene 7 swaps its material/children for the first
+  project's reveal and/or walks the camera through `RED.door` past `l = 1`. The doorway is
+  deliberately the LAST thing at the pin's bottom, so the project section can start on the
+  first pixel after the pin with no overlap.
 - **When he notices** → `SCENE3` in `src/scene3.js`: the three `[start, end]` windows, plus
-  `step` (how far he moves), `lean` and `bob`. Ranges are in `t`, not pixels, so they survive
-  any `--hero-scroll`.
+  `step` (0.21 m), `lean` (0.09 rad) and `bob`. Ranges are in `t`, not pixels, so they
+  survive any budget — what gives the beat its air is the story budget on top. The windows
+  are pinned in check-shot as the approved beat-fix baseline; retune on purpose, update there.
 - **How he reacts** → inside `Artist.update(time, dt, s3, starAt)` in `src/artist.js`: the
-  weights that split the turn across head (0.6), chest (0.2) and hips (0.1), the look-up
-  amount, `paused = 1 - 0.92 * notice` (how still the brush goes) and `0.13 * reach` (how far
-  the brush hand lifts). His aim is *derived* from the star's actual position, so moving the
-  star moves the reaction with it.
+  weights that split the turn across head (0.8), chest (0.3) and hips (0.12) — tuned so the
+  ~35° lateral anchor lands as a ~40° compound turn that survives a phone screen — the
+  look-up amount, `paused = 1 - 0.99 * notice` (how still the brush goes) and the
+  `+0.34 / −0.24 / −0.55` catch-lift on the brush arm. His aim is *derived* from the star's
+  actual position, so moving the star moves the reaction with it.
 - **Stance, idle, easel proportions** → `POSE` (yaw, contrapposto, shoulder/arm angles),
   `IDLE` (breath / sway / stroke rates and amplitudes, `strokeGate`) and `MARKS.easel`
   (leg splay, mast run, ledge height, top clamp positions) at the top of `src/artist.js`.
@@ -105,17 +230,21 @@ notices — one move, one beat.
 
 No downloads: no external model, texture, video or font. Artist + easel + props are
 **5 638 triangles across 88 meshes**, all lofted primitives, plus three procedural 128 px
-canvas textures generated at boot. Shadows are one 1024² map from the key light; the floor
+canvas textures generated at boot. Scene 4 adds ~0.7 k tris — the floor as two flush
+half-discs (same tessellation as the old single disc), 12 instanced debris chips, the veil
+shell — and one 150-point dust cloud; the fall costs one more damped scalar, no timelines. Shadows are one 1024² map from the key light; the floor
 does *not* receive it (props are grounded by soft radial blobs), which is what keeps the
 close-up from showing shadow acne under the nose.
 
 ## Optional visual smoke test
 
 `node tools/preview-shots.mjs` drives the real page in headless Chromium (WebGL via
-SwiftShader), scrolls the pin through 7 stops and writes a frame per stop to `.shots/`, then:
+SwiftShader), scrolls the pin through 11 stops (Scenes 1–3, the reach-end handover, the
+collapse, the lurch, the deep fall, the void, and back) and writes a frame per stop to
+`.shots/`, then:
 
 ```bash
-magick montage .shots/*.png -tile 4x2 -geometry 378x212+4+4 .shots/contact.png
+magick montage .shots/*.png -tile 4x3 -geometry 378x212+4+4 .shots/contact.png
 ```
 
 Needs `npx playwright install chromium`. Not part of the app.
