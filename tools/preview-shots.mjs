@@ -57,7 +57,7 @@ await page.waitForTimeout(1500);
 // fall 4508→6708. Add ?debug to the URL to get the star/hand/tip reticles in-frame.
 const px = await page.evaluate(() => {
   const m = window.__hero.storyMap;
-  return { reveal: m.revealPx, story: m.storyPx, fall: m.fallPx, total: m.totalPx };
+  return { reveal: m.revealPx, story: m.storyPx, fall: m.fallPx, abyss: m.abyssPx, total: m.totalPx };
 });
 const stopDefs = [
   [0, '0-load'],
@@ -69,7 +69,11 @@ const stopDefs = [
   [() => px.reveal + px.story + Math.round(px.fall * 0.035), '6-catch'], // catch closes on it (p=.035)
   [() => px.reveal + px.story + Math.round(px.fall * 0.075), '7-flare-collapse'], // flare peak + ground cracks
   [() => px.reveal + px.story + Math.round(px.fall * 0.16), '8-fall'], // gone; camera diving after him
-  [() => px.total, '9-void'],
+  [() => px.reveal + px.story + Math.round(px.fall * 0.62), '9-shatter'], // the body is breaking into code
+  [() => px.reveal + px.story + px.fall + Math.round(px.abyss * 0.06), '10-abyss-open'], // veil lifts: chaotic shaft
+  [() => px.reveal + px.story + px.fall + Math.round(px.abyss * 0.42), '11-abyss-mid'], // density climbing
+  [() => px.reveal + px.story + px.fall + Math.round(px.abyss * 0.85), '12-abyss-order'], // lattice order, room below
+  [() => px.total - 1, '13-bottom'],
   [() => 0, '10-back-at-0'],
 ];
 for (const [fn, name] of stopDefs) await goTo(fn() / px.total, name);

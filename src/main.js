@@ -6,7 +6,8 @@
  *    Scene 3  a light appears over the canvas at the END of the SAME move — on its own
  *             2400px story budget: it sits, he turns (~40°), he steps and reaches before anything falls
  *    Scene 4  the fall: the floor breaks open under him and the camera plunges after
- *             him into a deliberately black void (placeholder for the future abyss)
+ *             him; Scene 5/6  he shatters into code on the way down and the scroll
+ *             keeps falling through a procedural coding abyss that organises itself
  *  The pin now scrolls reveal(2108px) + story(2400px) + fall(2200px) = 6708px.
  *  A single piecewise map (scene4.js buildScrollMap) turns the pin into heroT and
  *  fall-local p: Scenes 1–2 run at their ORIGINAL 1/3400 px slope until the side
@@ -65,6 +66,7 @@ import { createCameraRig, PATH } from './camera-path.js';
 import { createStar, STAR } from './star.js';
 import { measureScene3, SCENE3 } from './scene3.js';
 import { createFallLayer, FALL, buildScrollMap } from './scene4.js';
+import { createAbyssLayer, ABYSS } from './scene5.js';
 import './style.css';
 
 gsap.registerPlugin(ScrollTrigger);
@@ -93,16 +95,20 @@ const cssNumber = (name, fallback) => {
   return Number.isFinite(v) ? v : fallback;
 };
 /** single source of truth for how far you scroll: --reveal-scroll + --story-scroll +
- *  --fall-scroll in style.css. The reveal budget runs Scenes 1–2 at exactly the old
- *  pixels (2108 px = the old heroT 0→0.62 of a 3400 px budget); Scene 3's beat gets a
- *  dedicated stretch budget; Scene 4 keeps its own. buildScrollMap wires all three. */
+ *  --fall-scroll + --abyss-scroll in style.css. The reveal budget runs Scenes 1–2 at
+ *  exactly the old pixels (2108 px = the old heroT 0→0.62 of a 3400 px budget); Scene
+ *  3's beat gets a dedicated stretch budget; Scene 4 keeps its own; and the abyss
+ *  travel is APPENDED — adding it cannot move any earlier frame, because every segment
+ *  of the map is defined by pixels. buildScrollMap wires all four. */
 const revealScroll = cssNumber('--reveal-scroll', 2108);
 const storyScroll = cssNumber('--story-scroll', 2400);
 const fallScroll = cssNumber('--fall-scroll', 2200);
+const abyssScroll = cssNumber('--abyss-scroll', 2800);
 const storyMap = buildScrollMap({
   revealPx: revealScroll,
   storyPx: storyScroll,
   fallPx: fallScroll,
+  abyssPx: abyssScroll, // Scenes 5–6's travel
   revealEndT: SCENE3.appear[0], // the reveal ends exactly where Scene 3's star window opens
 });
 const scrollLength = storyMap.totalPx; // the pin is one section: reveal + story + fall
@@ -246,8 +252,22 @@ const fall = createFallLayer({
   artist,
   star,
   split: heroSplit,
-  toP: storyMap.p, // the fall reads p straight off the three-budget map
+  toP: storyMap.p, // the fall reads p straight off the budget map
   lights: { key, rim, rim2, bounce, wash, canvasGlow },
+});
+/* Scenes 5–6: the shatter + the coding abyss. The layer reads the SAME damped pin
+   value the fall renders (fall.cur), so the dissolve can never disagree with the
+   fall, and it writes exactly nothing while its a = 0 (see src/scene5.js). */
+const abyss = createAbyssLayer({
+  scene,
+  camera,
+  renderer,
+  artist,
+  map: storyMap,
+  veil: fall.veil,
+  exposureBase: CONFIG.exposure,
+  reduced: reducedMotion,
+  scale: innerWidth < 700 ? ABYSS.mobileScale : 1,
 });
 
 const tween = gsap.to(state, {
@@ -315,7 +335,7 @@ if (debug) {
   });
   document.body.appendChild(readout);
 }
-window.__hero = { state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, FALL, heroSplit, storyMap, star, artist, fall, measureScene3, tween, ScrollTrigger };
+window.__hero = { state, rig, camera, scene, PATH, MARKS, STAR, SCENE3, FALL, ABYSS, heroSplit, storyMap, star, artist, fall, abyss, measureScene3, tween, ScrollTrigger };
 
 /* ───────────────────────────── render loop ───────────────────────── */
 
@@ -342,6 +362,9 @@ renderer.setAnimationLoop(() => {
   // Scene 4 post-pass: floor, flare, fall pose, camera descent, fog/lights/veil — all
   // pure functions of its own damped local p; exactly zero writes before it starts.
   const s4 = fall.update(state.t, elapsed, dt, s3, rig);
+  // Scene 5 post-pass: shatter off the fall's own damped progress; the abyss travel
+  // extends the descent, opens the veil/fog, blends the aim down the shaft.
+  const s5 = abyss.update(fall.cur, elapsed);
   if (debug) {
     // billboard the reticles at the camera each frame; they follow the live objects
     const tmpV = new THREE.Vector3();
@@ -366,7 +389,8 @@ renderer.setAnimationLoop(() => {
       `star ${s3.appear.toFixed(2)}  notice ${s3.notice.toFixed(2)}  reach ${s3.reach.toFixed(2)}  ` +
       `step ${artist.stats().step.toFixed(3)}m  stroke ${artist.stats().strokeGate.toFixed(3)}\n` +
       `fall p ${s4.p.toFixed(3)}  camY ${camera.position.y.toFixed(2)}m  drop ${s4.camDepth.toFixed(1)}m  ` +
-      `open ${s4.openW.toFixed(2)}  flare ${s4.flare.toFixed(2)}  p ${s4.p.toFixed(3)}`;
+      `open ${s4.openW.toFixed(2)}  flare ${s4.flare.toFixed(2)}  p ${s4.p.toFixed(3)}\n` +
+      `shatter ${s5.s.toFixed(2)}  abyss a ${s5.a.toFixed(3)}  org ${s5.w.org.toFixed(2)}  dens ${s5.w.dens.toFixed(2)}  camY ${camera.position.y.toFixed(1)}m`;
   }
 });
 

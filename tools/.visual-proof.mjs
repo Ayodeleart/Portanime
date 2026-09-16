@@ -16,6 +16,7 @@ import { createArtist } from '../src/artist.js';
 import { createStar, STAR } from '../src/star.js';
 import { measureScene3, SCENE3 } from '../src/scene3.js';
 import { FALL, createFallLayer, buildScrollMap, heroTime } from '../src/scene4.js';
+import { createAbyssLayer, ABYSS, shatterAt } from '../src/scene5.js';
 PATH.float.amp = 0;
 mkdirSync('.proof', { recursive: true });
 
@@ -44,6 +45,7 @@ function shoot(label, t01, { W = 800, H = 450, markers = false } = {}) {
     const l = new THREE.Object3D(); l.intensity = v; lights[k] = l;
   }
   const layer = createFallLayer({ scene, camera, renderer: null, artist, star, split: FALL.split, toP: map.p, lights });
+  const abyssX = createAbyssLayer({ scene, camera, renderer: null, artist, map, veil: layer.veil, reduced: true });
   // settle like the render loop does (constant scrub position, damp everything in)
   for (let i = 0; i < 700; i++) {
     const heroT = map.heroT(t01);
@@ -52,6 +54,7 @@ function shoot(label, t01, { W = 800, H = 450, markers = false } = {}) {
     star.update(s3, 1, 1 / 60);
     artist.update(1, 1 / 60, s3, star.anchor);
     layer.update(t01, 1, 1 / 60, s3, rig);
+    abyssX.update(layer.cur, 1);
   }
   camera.updateMatrixWorld(true);
   camera.updateProjectionMatrix();
@@ -78,7 +81,7 @@ function shoot(label, t01, { W = 800, H = 450, markers = false } = {}) {
   const tris = [];
   const tmpA = new THREE.Vector3(), tmpB = new THREE.Vector3(), tmpC = new THREE.Vector3();
   scene.traverse((o) => {
-    if (!o.isMesh || !o.visible || o.geometry?.type === 'Sprite') return;
+    if (!o.isMesh || o.isInstancedMesh || !o.visible || o.geometry?.type === 'Sprite') return;
     const geo = o.geometry;
     const pos = geo.getAttribute('position'); if (!pos) return;
     const col = o.material?.color ?? new THREE.Color(0x888888);
@@ -128,6 +131,115 @@ function shoot(label, t01, { W = 800, H = 450, markers = false } = {}) {
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+
+  // ── effects pass: Scene-4 debris + Scene-5 shatter/shaft systems. Instanced
+  // quads, line segments and points are read from the SAME buffers the WebGL
+  // renderer uses, so "where every glyph sits" is the real per-frame state.
+  let effectsDrawn = 0;
+  {
+    const _m = new THREE.Matrix4();
+    const _w = new THREE.Vector3();
+    const _v = new THREE.Vector3();
+    const _q = new THREE.Quaternion();
+    const _sc = new THREE.Vector3();
+    const _col = new THREE.Color();
+    const focal = H / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2));
+    const fogNear = scene.fog?.near ?? 2.6;
+    const fogFar = scene.fog?.far ?? 999;
+    const fogCol = scene.fog ? new THREE.Color(scene.fog.color) : new THREE.Color(0x101724);
+    camera.updateMatrixWorld(true);
+    const rectOf = (world, sizeM) => {
+      _v.copy(world).applyMatrix4(camera.matrixWorldInverse);
+      if (_v.z > -0.05) return null;
+      _w.copy(world).project(camera);
+      if (Math.abs(_w.x) > 1.25 || Math.abs(_w.y) > 1.3) return null;
+      const r = Math.max(0.5, (sizeM / -_v.z) * focal);
+      return [(_w.x * 0.5 + 0.5) * W, (1 - (_w.y * 0.5 + 0.5)) * H, r, -_v.z];
+    };
+    const paintColor = (cIn, dist, add) => {
+      const f = add ? 0 : THREE.MathUtils.smoothstep(dist, fogNear, fogFar);
+      _col.setRGB(cIn.r * (1 - f) + fogCol.r * f, cIn.g * (1 - f) + fogCol.g * f, cIn.b * (1 - f) + fogCol.b * f);
+      return _col;
+    };
+    scene.traverse((o) => {
+      if (!o.visible || o === star.group) return;
+      const mat = o.material;
+      if (!mat || (mat.opacity ?? 1) < 0.02) return;
+      const add = mat.blending === THREE.AdditiveBlending;
+      const alpha = Math.min(1, mat.opacity ?? 1);
+      ctx.globalCompositeOperation = add ? 'lighter' : 'source-over';
+      if (o.isInstancedMesh) {
+        const n = Math.min(o.count, 900);
+        for (let i = 0; i < n; i++) {
+          o.getMatrixAt(i, _m);
+          _m.decompose(_w, _q, _sc);
+          _w.applyMatrix4(o.matrixWorld);
+          const rr = rectOf(_w, Math.max(_sc.x, _sc.y));
+          if (!rr) continue;
+          const c = o.instanceColor ? new THREE.Color().fromBufferAttribute(o.instanceColor, i) : (mat.color ?? new THREE.Color(1, 1, 1));
+          const col = paintColor(c, rr[3], add);
+          const rgb = `${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)}`;
+          if (add && mat.map) {
+            // glyph/snippet quads: a texture is mostly transparent with bright cells —
+            // approximate the real coverage with a soft radial (still ADDITIVE, so the
+            // aggregate brightness matches a rendered frame far better than flat fills)
+            const gr = ctx.createRadialGradient(rr[0], rr[1], 0, rr[0], rr[1], rr[2]);
+            gr.addColorStop(0, `rgba(${rgb},${(alpha * 0.85).toFixed(3)})`);
+            gr.addColorStop(0.55, `rgba(${rgb},${(alpha * 0.3).toFixed(3)})`);
+            gr.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = gr;
+            ctx.fillRect(rr[0] - rr[2], rr[1] - rr[2], rr[2] * 2, rr[2] * 2);
+          } else {
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = `rgb(${rgb})`;
+            ctx.fillRect(rr[0] - rr[2], rr[1] - rr[2], rr[2] * 2, rr[2] * 2);
+          }
+          effectsDrawn++;
+        }
+      } else if (o.isLineSegments) {
+        const pos = o.geometry.getAttribute('position');
+        const idx = o.geometry.index;
+        const count = Math.min(idx ? idx.count : pos.count, 2400);
+        ctx.lineWidth = 1;
+        for (let i = 0; i + 1 < count; i += 2) {
+          const ia = idx ? idx.getX(i) : i;
+          const ib = idx ? idx.getX(i + 1) : i + 1;
+          const wa = new THREE.Vector3().fromBufferAttribute(pos, ia).applyMatrix4(o.matrixWorld);
+          const wb = new THREE.Vector3().fromBufferAttribute(pos, ib).applyMatrix4(o.matrixWorld);
+          const va = _v.copy(wa).applyMatrix4(camera.matrixWorldInverse);
+          if (va.z > -0.05) continue;
+          const pa = new THREE.Vector3().copy(wa).project(camera);
+          const pb = new THREE.Vector3().copy(wb).project(camera);
+          if (Math.abs(pa.x) > 1.25 || Math.abs(pa.y) > 1.3 || Math.abs(pb.x) > 1.25 || Math.abs(pb.y) > 1.3) continue;
+          const col = paintColor(mat.color ?? new THREE.Color(1, 1, 1), camera.position.distanceTo(wa.clone().lerp(wb, 0.5)), add);
+          ctx.globalAlpha = alpha;
+          ctx.strokeStyle = `rgb(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)})`;
+          ctx.beginPath();
+          ctx.moveTo((pa.x * 0.5 + 0.5) * W, (1 - (pa.y * 0.5 + 0.5)) * H);
+          ctx.lineTo((pb.x * 0.5 + 0.5) * W, (1 - (pb.y * 0.5 + 0.5)) * H);
+          ctx.stroke();
+          effectsDrawn++;
+        }
+      } else if (o.isPoints) {
+        const pos = o.geometry.getAttribute('position');
+        const count = Math.min(pos.count, 1200);
+        for (let i = 0; i < count; i++) {
+          _w.fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+          const rr = rectOf(_w, mat.size ?? 0.05);
+          if (!rr) continue;
+          const col = paintColor(mat.color ?? new THREE.Color(1, 1, 1), rr[3], add);
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = `rgb(${Math.round(col.r * 255)},${Math.round(col.g * 255)},${Math.round(col.b * 255)})`;
+          ctx.beginPath();
+          ctx.arc(rr[0], rr[1], rr[2], 0, 7);
+          ctx.fill();
+          effectsDrawn++;
+        }
+      }
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+    });
+  }
 
   // star: additive radial gradients exactly like the depth-test-free sprites, sizes from world scale
   const starInfo = { center: null, haloPx: 0, ratio: 0 };
@@ -203,6 +315,7 @@ function shoot(label, t01, { W = 800, H = 450, markers = false } = {}) {
     mark(artist.parts.head.getWorldPosition(new THREE.Vector3()), '#ff2fd6', 7);
   }
 
+  starInfo.effectsDrawn = effectsDrawn;
   return { cv, info: starInfo };
 }
 
@@ -241,6 +354,11 @@ const STOPS = [
   ['07-flare', (map.revealPx + map.storyPx + 0.075 * map.fallPx) / map.totalPx, 'star flares as the ground cracks p=.075 — cause visible'],
   ['08-break', (map.revealPx + map.storyPx + 0.105 * map.fallPx) / map.totalPx, 'star breaks away at the top of the reach line p=.105'],
   ['09-fall', (map.revealPx + map.storyPx + 0.16 * map.fallPx) / map.totalPx, 'ground gone, he falls'],
+  ['10-shatter', (map.revealPx + map.storyPx + 0.62 * map.fallPx) / map.totalPx, 'late fall: the body is breaking into code'],
+  ['11-abyss-open', (map.revealPx + map.storyPx + map.fallPx + 0.06 * map.abyssPx) / map.totalPx, 'veil opens: chaotic abyss, fast upward streams'],
+  ['12-abyss-mid', (map.revealPx + map.storyPx + map.fallPx + 0.42 * map.abyssPx) / map.totalPx, 'mid abyss: density climbs, glyphs organize'],
+  ['13-abyss-order', (map.revealPx + map.storyPx + map.fallPx + 0.85 * map.abyssPx) / map.totalPx, 'late abyss: lattice order, noise thins, room below'],
+  ['14-bottom', (map.revealPx + map.storyPx + map.fallPx + 1.0 * map.abyssPx) / map.totalPx - 0.0002, 'bottom of the pin: fully organised shaft'],
 ];
 const VIEWS = [['desk', 800, 450], ['phone', 390, 844]];
 
@@ -251,6 +369,7 @@ for (const [label, t01, note] of STOPS) {
     const extras = [];
     if (info.center) extras.push(`star@(${info.center[0].toFixed(0)},${info.center[1].toFixed(0)})${info.inFrame ? '' : ' OFF-SCREEN'} halo ${info.haloPx.toFixed(0)}px lumRatio ${info.inFrame ? info.ratio.toFixed(1) : '—'}`);
     if (info.gapPx !== undefined) extras.push(`tip→star ${info.gapPx.toFixed(0)}px hand→star ${info.handGapPx.toFixed(0)}px`);
+    if (info.effectsDrawn !== undefined && label.startsWith('1')) extras.push(`effect items in frame: ${info.effectsDrawn}`);
     console.log(`${label} [${name}] ${note}${extras.length ? '\n        ' + extras.join('  |  ') : ''}`);
   }
 }

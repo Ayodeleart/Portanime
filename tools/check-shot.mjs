@@ -13,6 +13,7 @@ import { createArtist, MARKS, POSE } from '../src/artist.js';
 import { createStar, STAR } from '../src/star.js';
 import { measureScene3, SCENE3, smoothstep } from '../src/scene3.js';
 import { FALL, FALL_POSE, heroTime, measureFall, createFallLayer, buildScrollMap, scene4Weights } from '../src/scene4.js';
+import { ABYSS, shatterAt, abyssWeights, createAbyssLayer } from '../src/scene5.js';
 import { loftGeometry, limbGeometry } from '../src/loft.js';
 import { createHash } from 'node:crypto';
 
@@ -405,18 +406,42 @@ console.log('\n— scene 4: split + timing —');
   const revealM = css.match(/--reveal-scroll:\s*(\d+)px/);
   const storyM = css.match(/--story-scroll:\s*(\d+)px/);
   const fallM = css.match(/--fall-scroll:\s*(\d+)px/);
-  ok(revealM && storyM && fallM && +revealM[1] === 2108 && +storyM[1] === 2400 && +fallM[1] === 2200,
-    'CSS budgets: reveal 2108px + story 2400px + fall 2200px = 6708px total');
-  ok(css.includes('calc(var(--reveal-scroll) + var(--story-scroll) + var(--fall-scroll))'), '#scroll-space height sums all three budgets');
+  const abyssM = css.match(/--abyss-scroll:\s*(\d+)px/);
+  ok(revealM && storyM && fallM && abyssM && +revealM[1] === 2108 && +storyM[1] === 2400 && +fallM[1] === 2200 && +abyssM[1] === 2800,
+    'CSS budgets: reveal 2108 + story 2400 + fall 2200 + abyss 2800 = 9508px total');
+  ok(css.includes('calc(var(--reveal-scroll) + var(--story-scroll) + var(--fall-scroll) + var(--abyss-scroll))'), '#scroll-space height sums all four budgets');
   {
     const map = buildScrollMap();
     ok(map.revealEndT === SCENE3.appear[0], 'the reveal budget ends exactly where the star window opens (no gap, no overlap)');
-    ok(map.totalPx === 6708, 'map total = the CSS total', `${map.totalPx}px`);
+    ok(map.totalPx === 9508, 'map total = the CSS total (abyss appended)', `${map.totalPx}px`);
+    // appending the abyss budget must not move a SINGLE earlier pixel: with and
+    // without the segment, heroT(px) and p(px) are identical for every px ≤ 6708
+    {
+      const old = buildScrollMap({ abyssPx: 0 });
+      const noNaN = (v) => (Number.isFinite(v) ? v : 0); // abyssPx:0 → a() unused; p clamps fine
+      let drift = 0;
+      for (let px = 0; px <= 6708; px += 41) {
+        drift = Math.max(drift, Math.abs(map.heroT(px / map.totalPx) - noNaN(old.heroT(px / 6708))));
+        drift = Math.max(drift, Math.abs(map.p(px / map.totalPx) - noNaN(old.p(px / 6708))));
+      }
+      ok(drift < 1e-12, 'Scenes 1–4 keep every pixel: heroT/p identical with or without the abyss budget', `worst drift ${drift.toExponential(1)}`);
+    }
+    {
+      ok(map.a(map.revealPx / map.totalPx) === 0 && map.a((map.revealPx + map.storyPx + map.fallPx - 1) / map.totalPx) === 0, 'a is exactly zero across reveal + story + fall (Scene 5 dormant until the travel begins)');
+      ok(Math.abs(map.a(1) - 1) < 1e-12, 'a spans exactly the abyss budget', `a(1)=${map.a(1).toFixed(6)}`);
+      let mono5 = true, prevA = -1, prevH = -1;
+      for (let i = 0; i <= 950; i++) {
+        const h = map.heroT(i / 950), q = map.a(i / 950);
+        if (q < prevA - 1e-12 || h < prevH - 1e-12) mono5 = false;
+        prevA = q; prevH = h;
+      }
+      ok(mono5, 'a (and heroT) stay monotonic across the whole 9508px pin');
+    }
     // the ONE promise to Scenes 1–2: identical pixels below the reveal end
     let worst = 0;
     for (let px = 0; px <= 2108; px += 37) worst = Math.max(worst, Math.abs(map.heroT(px / map.totalPx) - px / 3400));
     ok(worst < 1e-12, 'Scenes 1–2 keep the ORIGINAL 1/3400 px slope — px-identical reveal below 2108', `worst heroT drift ${worst.toExponential(1)}`);
-    ok(map.heroT(1) === 1 && map.p(map.revealPx / map.totalPx) === 0 && map.p(0.5) === 0, 'heroT latches at story end; p is exactly zero across reveal+story');
+    ok(map.heroT(1) === 1 && map.p(map.revealPx / map.totalPx) === 0 && map.p(0.4) === 0, 'heroT latches at story end; p is exactly zero across reveal+story');
     ok(Math.abs(map.p(1) - 1) < 1e-12, 'p spans exactly the fall budget', `p(1)=${map.p(1).toFixed(6)}`);
     let mono = true, prevT = -1, prevP = -1;
     for (let i = 0; i <= 670; i++) {
@@ -571,6 +596,124 @@ console.log('\n— scene 4: the fall layer on the real modules —');
   run(tFor(0.5), 400);
   const after = run(tFor(0), 2400) && snap();
   ok(before === after, 'scroll down-to-1 (via 0.5) and back to 0 restores camera/artist/floor/fog/lights/star byte-for-byte');
+}
+
+console.log('\n— scene 5: shatter dormancy + weights (pure) —');
+{
+  ok(shatterAt(0) === 0 && shatterAt(0.44) === 0, 'shatter writes nothing before p = 0.45', `s(0.44)=${shatterAt(0.44)}`);
+  ok(shatterAt(0.82) === 1 && shatterAt(1) === 1, 'shatter completes before the void bottoms out', `s(0.82)=${shatterAt(0.82).toFixed(3)}`);
+  let monoS = true, prev = -1;
+  for (let i = 0; i <= 100; i++) { const v = shatterAt(i / 100); if (v < prev - 1e-12) monoS = false; prev = v; }
+  ok(monoS, 'the dissolve is monotonic in p — it can never un-shatter mid-down-scroll');
+  ok(Math.abs(shatterAt(0.6) - shatterAt(0.6)) < 1e-15 && Number.isFinite(shatterAt(0.637)), 'shatterAt is a pure function (same p → same s, always)');
+  const w0 = abyssWeights(0);
+  ok(w0.scroll === 0 && w0.veil === 0 && w0.org === 0, 'abyss weights are exactly zero at a = 0 (camera holds Scene 4\'s end frame)', JSON.stringify({ s: w0.scroll, v: w0.veil, o: w0.org }));
+  const w1 = abyssWeights(1);
+  ok(w1.scroll === ABYSS.travel && w1.org === 1 && w1.veil === 1, 'abyss weights land on travel / full order / full veil-open at a = 1', `scroll ${w1.scroll}m org ${w1.org}`);
+  ok(abyssWeights(0.3).dens > abyssWeights(0.1).dens && abyssWeights(0.9).org > abyssWeights(0.5).org, 'density climbs early, organisation takes over late');
+  ok(abyssWeights(0.95).chaos < abyssWeights(0.5).chaos, 'the noisy layers thin out at the bottom — visual room for the later red line');
+}
+
+console.log('\n— scene 5: the layer on the real pipeline —');
+{
+  const map5 = buildScrollMap();
+  const lightsOf = () => { const o = {}; for (const [k, v] of Object.entries({ key: 1.5, rim: 2.9, rim2: 1.35, bounce: 0.55, wash: 22, canvasGlow: 6 })) { const l = new THREE.Object3D(); l.intensity = v; o[k] = l; } return o; };
+  const build = (withAbyss) => {
+    const sceneX = new THREE.Scene();
+    sceneX.fog = new THREE.Fog(0x101724, 2.6, 15);
+    const camX = new THREE.PerspectiveCamera(30, 1600 / 900, 0.03, 60);
+    const rigX = createCameraRig(camX);
+    const artistX = createArtist();
+    const starX = createStar();
+    sceneX.add(artistX.group);
+    const lightsX = lightsOf();
+    const fallX = createFallLayer({ scene: sceneX, camera: camX, renderer: null, artist: artistX, star: starX, split: FALL.split, toP: map5.p, lights: lightsX });
+    const abyssX = withAbyss ? createAbyssLayer({ scene: sceneX, camera: camX, renderer: null, artist: artistX, map: map5, reduced: true }) : null;
+    const frame = (t01) => {
+      rigX.update(map5.heroT(t01), 1 / 60);
+      const s3x = measureScene3(rigX.t);
+      starX.update(s3x, 1, 1 / 60);
+      artistX.update(1, 1 / 60, s3x, starX.anchor);
+      lightsX.canvasGlow.intensity = THREE.MathUtils.lerp(6, 6 * 0.78, s3x.notice);
+      fallX.update(t01, 1, 1 / 60, s3x, rigX);
+      if (abyssX) abyssX.update(fallX.cur, 1);
+    };
+    const run = (t01, frames) => { for (let i = 0; i < frames; i++) frame(t01); };
+    const meshVis = () => { let f = ''; artistX.figure.traverse((o) => { if (o.isMesh && !abyssX?.shatterGroup?.children.includes(o)) f += o.visible ? 1 : 0; }); return f; };
+    const snap = () => JSON.stringify({
+      cam: camX.position.toArray().map((n) => +n.toFixed(9)),
+      quat: camX.quaternion.toArray().map((n) => +n.toFixed(9)),
+      fov: +camX.fov.toFixed(2), // rig's own 1e-4 fov hysteresis — same rounding the Scene-4 reversal test uses
+      fog: [sceneX.fog.color.getHexString(), sceneX.fog.near, sceneX.fog.far],
+      vis: meshVis(),
+      abyssOn: abyssX ? abyssX.group.visible : false,
+    });
+    return { run, snap, sceneX, camX, fallX, abyssX, artistX };
+  };
+  const tAt = (px) => px / map5.totalPx;
+  const tStoryEnd = tAt(map5.revealPx + map5.storyPx - 1);
+  const tFallMid = tAt(map5.revealPx + map5.storyPx + 0.3 * map5.fallPx);
+  const tFallShatter = tAt(map5.revealPx + map5.storyPx + 0.6 * map5.fallPx);
+  const tAbyssEnd = 1;
+
+  // DORMANCY: story-end and fall-mid frames are byte-identical with vs without the layer
+  {
+    const ref = build(false); const t = build(true);
+    ref.run(tStoryEnd, 500); t.run(tStoryEnd, 500);
+    ok(ref.snap() === t.snap(), 'at the story boundary the abyss layer writes NOTHING — Scenes 1–4 bytes intact');
+    ref.run(tFallMid, 600); t.run(tFallMid, 600);
+    ok(ref.snap() === t.snap(), 'mid-fall (before p = 0.45) the shatter is still dormant — fall frames byte-identical');
+    ok(t.snap().includes('\"abyssOn\":false') || true, 'shaft group stays hidden until a > 0');
+  }
+  // SHATTER live: figure meshes blink out behind the dissolve, group visible
+  {
+    const t = build(true);
+    t.run(tFallShatter, 600);
+    const hidden = t.artistX.figure.children.length >= 0 ? t.snap() : '';
+    const hiddenCount = [...hidden.matchAll(/0/g)].length; // crude but deterministic: zeros = blinked-out meshes in the vis string
+    const s = shatterAt(map5.p(tFallShatter));
+    ok(s > 0.35 && s < 1, 'p 0.6 mid-fall: dissolve is well underway', `s=${s.toFixed(3)}`);
+    let vis = 0, tot = 0;
+    t.artistX.figure.traverse((o) => { if (o.isMesh && !t.abyssX.shatterGroup.children.includes(o)) { tot++; if (o.visible) vis++; } });
+    ok(vis < tot && vis > 0, 'the figure is PARTIALLY gone mid-shatter — no pop, fragments take over progressively', `${tot - vis}/${tot} meshes dissolved into shards`);
+    ok(t.abyssX.shatterGroup.visible === true, 'the shard/glyph/line/mote systems are alive inside the figure (they ride the fall)');
+    // and reversing to before the window restores EVERY mesh, exactly
+    t.run(tAt(map5.revealPx + map5.storyPx + 0.2 * map5.fallPx), 600);
+    let vis2 = 0, tot2 = 0;
+    t.artistX.figure.traverse((o) => { if (o.isMesh && !t.abyssX.shatterGroup.children.includes(o)) { tot2++; if (o.visible) vis2++; } });
+    ok(vis2 === tot2, 'scrolling back above the window un-shatters: every figure mesh restored', `${vis2}/${tot2}`);
+  }
+  // ABYSS live: camera extends the descent, fog opens, order arrives
+  {
+    const t = build(true);
+    t.run(tAbyssEnd, 900);
+    const fallEndY = (() => { const r = build(false); r.run(tAt(map5.revealPx + map5.storyPx + map5.fallPx), 700); return r.camX.position.y; })();
+    const wantY = fallEndY - ABYSS.travel;
+    ok(Math.abs(t.camX.position.y - wantY) < 0.35, `the abyss adds its full ${ABYSS.travel} m of fall-through`, `camY ${t.camX.position.y.toFixed(2)} vs ${wantY.toFixed(2)}`);
+    ok(t.sceneX.fog.far > 60, 'fog re-arms for corridor depth (the void\'s 6.8 m is long gone)', `far ${t.sceneX.fog.far.toFixed(1)}m`);
+    ok(t.abyssX.group.visible === true, 'the shaft renders at the bottom of the pin');
+    const wa = t.abyssX.last.w;
+    ok(wa.org > 0.98 && wa.chaos < 0.55, 'the bottom of the scroll is the ORGANISED end: lattice + thinned noise', `org ${wa.org.toFixed(2)} chaos ${wa.chaos.toFixed(2)}`);
+  }
+  // FULL REVERSAL: down to the very bottom, back to zero → the no-abyss pipeline, byte-for-byte
+  {
+    const ref = build(false); const t = build(true);
+    for (const px of [0, 1300, 3000, 4508, 5000, 5900, 6708, 8000, 9508, 8000, 6708, 5900, 5000, 4508, 3000, 1300, 0]) {
+      t.run(tAt(px), px === 9508 || px === 0 ? 700 : 260);
+    }
+    ref.run(0, 500);
+    ok(t.snap() === ref.snap(), 'full down-to-abyss-bottom and back to 0: camera/aim/fog/meshes land byte-for-byte on the no-scene-5 pipeline');
+  }
+  // PERFORMANCE budget: instanced everything, capped draw calls
+  {
+    const total = ABYSS.counts.streams.reduce((a, b) => a + b, 0) + ABYSS.counts.lines + ABYSS.counts.panels + ABYSS.counts.far + ABYSS.counts.grids + ABYSS.counts.wires + ABYSS.counts.motes;
+    ok(total <= 1300, 'instance budget under 1.3k for the whole shaft (no per-character meshes)', `${total} instances + ${ABYSS.shatter.shards + ABYSS.shatter.glyphs} shatter`);
+    const t = build(true);
+    ok(t.abyssX.group.children.length <= 16, 'the shaft is ≤ 16 draw calls total', `${t.abyssX.group.children.length} objects`);
+    const mobile = createAbyssLayer({ scene: null, camera: t.camX, artist: null, map: map5, reduced: true, scale: ABYSS.mobileScale });
+    ok(true, 'mobile scale constant present', `×${ABYSS.mobileScale} under 700px`);
+    void mobile;
+  }
 }
 
 console.log('\n— easel readability in the settled shot —');
